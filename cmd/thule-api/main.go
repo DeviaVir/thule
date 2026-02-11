@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,13 +13,21 @@ import (
 	"github.com/example/thule/internal/webhook"
 )
 
+var listenAndServe = http.ListenAndServe
+
 func main() {
+	if err := run(); err != nil {
+		log.Fatalf("thule-api failed: %v", err)
+	}
+}
+
+func run() error {
 	addr := getEnv("THULE_API_ADDR", ":8080")
 	secret := os.Getenv("THULE_WEBHOOK_SECRET")
 
 	jobs, err := queue.FromEnv()
 	if err != nil {
-		log.Fatalf("queue init failed: %v", err)
+		return fmt.Errorf("queue init failed: %w", err)
 	}
 	store := storage.NewMemoryDeliveryStore()
 	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
@@ -32,9 +41,10 @@ func main() {
 	})
 
 	log.Printf("thule-api listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("api stopped: %v", err)
+	if err := listenAndServe(addr, mux); err != nil {
+		return fmt.Errorf("api stopped: %w", err)
 	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

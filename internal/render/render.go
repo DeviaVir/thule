@@ -43,16 +43,20 @@ func RenderProject(projectRoot string, cfg thuleconfig.Config) ([]Resource, erro
 }
 
 func filterFluxResources(resources []Resource, cfg thuleconfig.Config) []Resource {
-	allowed := map[string]struct{}{}
+	if len(cfg.Render.Flux.IncludeKinds) == 0 {
+		return resources
+	}
+
+	allowed := map[string]struct{}{
+		"HelmRelease":   {},
+		"Kustomization": {},
+		"GitRepository": {},
+		"OCIRepository": {},
+	}
 	for _, k := range cfg.Render.Flux.IncludeKinds {
 		allowed[k] = struct{}{}
 	}
-	if len(allowed) == 0 {
-		allowed["HelmRelease"] = struct{}{}
-		allowed["Kustomization"] = struct{}{}
-		allowed["GitRepository"] = struct{}{}
-		allowed["OCIRepository"] = struct{}{}
-	}
+
 	out := make([]Resource, 0, len(resources))
 	for _, r := range resources {
 		if _, ok := allowed[r.Kind]; ok {
@@ -146,7 +150,8 @@ func parseYAMLDocuments(content string) ([]Resource, error) {
 			}
 		}
 		if r.APIVersion == "" || r.Kind == "" || r.Name == "" {
-			return nil, fmt.Errorf("manifest missing required identity fields")
+			// Skip non-resource YAML (values files, kustomize configs, etc.).
+			continue
 		}
 		r.Body["apiVersion"] = r.APIVersion
 		r.Body["kind"] = r.Kind

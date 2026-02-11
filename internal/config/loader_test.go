@@ -45,3 +45,34 @@ func TestLoadReadsAndValidatesFile(t *testing.T) {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }
+
+func TestDecodeJSONConfig(t *testing.T) {
+	input := []byte(`{"version":"v1","project":"p","clusterRef":"c","namespace":"n","render":{"mode":"yaml","path":"."}}`)
+	cfg, err := Decode(input)
+	if err != nil {
+		t.Fatalf("decode json failed: %v", err)
+	}
+	if cfg.Project != "p" || cfg.Render.Mode != "yaml" {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestDecodeSimpleYAMLLists(t *testing.T) {
+	input := []byte("version: v1\nproject: p\nclusterRef: c\nnamespace: n\nrender:\n  mode: flux\n  path: .\n  flux.includeKinds:\n    - Kustomization\n    - HelmRelease\n  helm.valuesFiles:\n    - values.yaml\n")
+	cfg, err := Decode(input)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if len(cfg.Render.Flux.IncludeKinds) != 2 || cfg.Render.Flux.IncludeKinds[0] != "Kustomization" {
+		t.Fatalf("unexpected includeKinds: %+v", cfg.Render.Flux.IncludeKinds)
+	}
+	if len(cfg.Render.Helm.ValuesFiles) != 1 || cfg.Render.Helm.ValuesFiles[0] != "values.yaml" {
+		t.Fatalf("unexpected values files: %+v", cfg.Render.Helm.ValuesFiles)
+	}
+}
+
+func TestDecodeRejectsInvalidPayload(t *testing.T) {
+	if _, err := Decode([]byte("not: valid")); err == nil {
+		t.Fatal("expected error for invalid payload")
+	}
+}

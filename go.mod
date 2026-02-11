@@ -3,6 +3,7 @@ module github.com/example/thule
 go 1.22
 
 require (
+	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/redis/go-redis/v9 v9.17.3
 	golang.org/x/crypto v0.32.0
@@ -26,6 +27,7 @@ require (
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.0 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect

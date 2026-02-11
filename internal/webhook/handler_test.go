@@ -164,6 +164,15 @@ func TestWebhookSignatureValidation(t *testing.T) {
 			t.Fatalf("expected 401, got %d", rr.Code)
 		}
 	})
+
+	t.Run("missing-signature", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload))
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rr.Code)
+		}
+	})
 }
 
 func TestWebhookParsesGitLabCloseEventType(t *testing.T) {
@@ -187,5 +196,36 @@ func TestWebhookParsesGitLabCloseEventType(t *testing.T) {
 	defer cancel()
 	if _, err := jobs.Dequeue(ctx); err == nil {
 		t.Fatal("expected no queued job for close event")
+	}
+}
+
+func TestWebhookRejectsUnsupportedNoteCommand(t *testing.T) {
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
+	payload := []byte(`{
+		"object_kind":"note",
+		"event_id":"evt-3",
+		"project":{"path_with_namespace":"group/repo"},
+		"merge_request":{"iid":7,"last_commit":"sha777"},
+		"object_attributes":{"note":"hello"}
+	}`)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestDecodeEventUnsupportedKind(t *testing.T) {
+	if _, err := decodeEvent([]byte(`{"object_kind":"push"}`)); err == nil {
+		t.Fatal("expected error for unsupported event kind")
+	}
+}
+
+func TestNumHandlesIntTypes(t *testing.T) {
+	if num(int64(7)) != 7 {
+		t.Fatal("expected int64 to convert")
+	}
+	if num(int(8)) != 8 {
+		t.Fatal("expected int to convert")
 	}
 }
