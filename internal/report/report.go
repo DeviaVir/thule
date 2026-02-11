@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/example/thule/internal/diff"
+	"github.com/example/thule/internal/policy"
 )
 
-func BuildPlanComment(project string, sha string, changes []diff.Change, summary diff.Summary, maxResourceDetails int) string {
+func BuildPlanComment(project string, sha string, changes []diff.Change, summary diff.Summary, findings []policy.Finding, maxResourceDetails int) string {
 	if maxResourceDetails <= 0 {
 		maxResourceDetails = 200
 	}
@@ -31,6 +32,16 @@ func BuildPlanComment(project string, sha string, changes []diff.Change, summary
 		}
 		b.WriteString(line + "\n")
 	}
+
+	b.WriteString("\n### Policy Findings\n")
+	if len(findings) == 0 {
+		b.WriteString("- none\n")
+	} else {
+		for _, f := range findings {
+			b.WriteString(fmt.Sprintf("- `%s` `%s` %s (%s)\n", f.Severity, f.RuleID, f.Message, f.ResourceID))
+		}
+	}
+
 	b.WriteString("\n> Thule is read-only and did not apply these changes. Flux or repository operators must reconcile/apply.\n")
 	return b.String()
 }

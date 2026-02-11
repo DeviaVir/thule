@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/example/thule/internal/diff"
+	"github.com/example/thule/internal/policy"
 )
 
 func TestBuildPlanComment(t *testing.T) {
-	body := BuildPlanComment("payments", "abc", []diff.Change{{ID: "x", Action: diff.Create, ChangedKeys: []string{"spec"}, Risks: []string{"workload-spec-change"}}}, diff.Summary{Creates: 1}, 10)
-	for _, want := range []string{"Thule Plan", "payments", "abc", "CREATE=1", "read-only", "changed=[spec]", "risks=[workload-spec-change]"} {
+	body := BuildPlanComment("payments", "abc", []diff.Change{{ID: "x", Action: diff.Create, ChangedKeys: []string{"spec"}, Risks: []string{"workload-spec-change"}}}, diff.Summary{Creates: 1}, []policy.Finding{{RuleID: "r1", Severity: policy.SeverityWarn, Message: "m1", ResourceID: "id1"}}, 10)
+	for _, want := range []string{"Thule Plan", "payments", "abc", "CREATE=1", "read-only", "changed=[spec]", "risks=[workload-spec-change]", "Policy Findings", "r1"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in body: %s", want, body)
 		}
@@ -18,7 +19,7 @@ func TestBuildPlanComment(t *testing.T) {
 
 func TestBuildPlanCommentTruncates(t *testing.T) {
 	changes := []diff.Change{{ID: "1", Action: diff.Create}, {ID: "2", Action: diff.Create}}
-	body := BuildPlanComment("p", "sha", changes, diff.Summary{Creates: 2}, 1)
+	body := BuildPlanComment("p", "sha", changes, diff.Summary{Creates: 2}, nil, 1)
 	if !strings.Contains(body, "truncated") {
 		t.Fatalf("expected truncation marker: %s", body)
 	}
