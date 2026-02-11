@@ -6,12 +6,9 @@ It watches Merge Request changes, renders desired Kubernetes resources, diffs ag
 
 ## Current capabilities
 
-> Optional approval mode: on successful plan with no lock conflicts, Thule can auto-approve MR; on lock conflict or plan failure it requests changes.
-
 
 - MR webhook ingestion and deduplicated queueing.
 - Atlantis-style project locking: changed project folders are locked per MR to prevent conflicting parallel plans.
-- Optional approval decisions: approve on successful unlocked plans; request changes on lock conflicts or planning failures.
 - Changed-file project discovery with per-project `thule.yaml`.
 - Rendering modes: `yaml`, `kustomize` (path-based), `helm` (rendered YAML input), `flux` (kind-aware filtering).
 - Diffing with create/patch/delete/no-op actions, ignore paths, prune control, risk tags.

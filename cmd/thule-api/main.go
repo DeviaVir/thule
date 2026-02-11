@@ -9,7 +9,6 @@ import (
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
-	"github.com/example/thule/internal/vcs"
 	"github.com/example/thule/internal/webhook"
 )
 
@@ -19,7 +18,7 @@ func main() {
 
 	jobs := queue.NewMemoryQueue(100)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), vcs.NewMemoryApprover())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	handler := webhook.NewHandler(secret, orch)
 
 	mux := http.NewServeMux()

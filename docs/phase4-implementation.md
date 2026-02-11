@@ -8,8 +8,6 @@ This update delivers a practical Phase 4 developer-experience slice.
   - Webhook layer now recognizes GitLab note events with `/thule plan` and routes them as `comment.plan` events.
 - **Developer local preview parity**
   - Added `cmd/thule` CLI with `plan --project <path> [--sha]` to run local preview and print plan output.
-- **Optional approval system**
-  - Added optional approval decisions: approve when plans succeed and no lock conflict occurred, request changes on lock conflicts/failures.
 - **Code quality/refactor pass**
   - Planner now safely handles optional comment publisher dependency when recording artifacts.
   - Documentation was expanded significantly for install, usage, GitLab wiring, and phase status.

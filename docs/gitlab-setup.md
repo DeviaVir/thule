@@ -71,9 +71,3 @@ When a merge request changes files under a Thule project folder, Thule attempts 
 
 This mirrors Atlantis-style project-level serialization and prevents conflicting concurrent plan pipelines for the same folder.
 
-## Optional approval behavior
-
-When approval integration is enabled, Thule can publish MR approval decisions:
-
-- `approved`: plan succeeded and lock checks passed.
-- `request_changes`: lock conflict or plan failure occurred.

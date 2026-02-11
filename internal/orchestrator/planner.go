@@ -27,11 +27,10 @@ type Planner struct {
 	status     vcs.StatusPublisher
 	runs       run.Store
 	policyEval policy.Evaluator
-	approver   vcs.Approver
 }
 
-func NewPlanner(repoRoot string, cluster ClusterReader, comments vcs.CommentStore, status vcs.StatusPublisher, runs run.Store, policyEval policy.Evaluator, approver vcs.Approver) *Planner {
-	return &Planner{repoRoot: repoRoot, cluster: cluster, comments: comments, status: status, runs: runs, policyEval: policyEval, approver: approver}
+func NewPlanner(repoRoot string, cluster ClusterReader, comments vcs.CommentStore, status vcs.StatusPublisher, runs run.Store, policyEval policy.Evaluator) *Planner {
+	return &Planner{repoRoot: repoRoot, cluster: cluster, comments: comments, status: status, runs: runs, policyEval: policyEval}
 }
 
 func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error {
@@ -97,9 +96,6 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	if p.status != nil {
 		p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/plan", State: vcs.CheckSuccess, Description: "Thule plan completed"})
 	}
-	if p.approver != nil {
-		p.approver.SetApproval(vcs.ApprovalRecord{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Decision: vcs.DecisionApproved, Reason: "plan succeeded and no project lock conflicts"})
-	}
 	return nil
 }
 
@@ -109,8 +105,5 @@ func (p *Planner) finishWithError(evt MergeRequestEvent, runID int64, err error)
 	}
 	if p.status != nil {
 		p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/plan", State: vcs.CheckFailed, Description: err.Error()})
-	}
-	if p.approver != nil {
-		p.approver.SetApproval(vcs.ApprovalRecord{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Decision: vcs.DecisionRequestChanges, Reason: err.Error()})
 	}
 }

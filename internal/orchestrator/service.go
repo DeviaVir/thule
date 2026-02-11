@@ -9,7 +9,6 @@ import (
 	"github.com/example/thule/internal/project"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
-	"github.com/example/thule/internal/vcs"
 )
 
 type MergeRequestEvent struct {
@@ -22,14 +21,13 @@ type MergeRequestEvent struct {
 }
 
 type Service struct {
-	jobs     queue.Queue
-	store    storage.DeliveryStore
-	locker   lock.Locker
-	approver vcs.Approver
+	jobs   queue.Queue
+	store  storage.DeliveryStore
+	locker lock.Locker
 }
 
-func New(jobs queue.Queue, store storage.DeliveryStore, locker lock.Locker, approver vcs.Approver) *Service {
-	return &Service{jobs: jobs, store: store, locker: locker, approver: approver}
+func New(jobs queue.Queue, store storage.DeliveryStore, locker lock.Locker) *Service {
+	return &Service{jobs: jobs, store: store, locker: locker}
 }
 
 func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeRequestEvent) error {
@@ -57,7 +55,6 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 			ok, owner := s.locker.Acquire(event.Repository, p.Root, event.MergeReqID)
 			if !ok {
 				s.store.Release(event.DeliveryID)
-				s.requestChanges(event, fmt.Sprintf("project %q is locked by MR !%d", p.Root, owner))
 				return fmt.Errorf("project %q is locked by MR !%d", p.Root, owner)
 			}
 		}
@@ -72,19 +69,11 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 		ChangedFiles: event.ChangedFiles,
 	}); err != nil {
 		s.store.Release(event.DeliveryID)
-		s.requestChanges(event, err.Error())
 		return err
 	}
 
 	s.store.Commit(event.DeliveryID)
 	return nil
-}
-
-func (s *Service) requestChanges(event MergeRequestEvent, reason string) {
-	if s.approver == nil {
-		return
-	}
-	s.approver.SetApproval(vcs.ApprovalRecord{MergeReqID: event.MergeReqID, SHA: event.HeadSHA, Decision: vcs.DecisionRequestChanges, Reason: reason})
 }
 
 func isCloseEvent(eventType string) bool {

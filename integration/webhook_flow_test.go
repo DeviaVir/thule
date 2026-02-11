@@ -13,14 +13,13 @@ import (
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
-	"github.com/example/thule/internal/vcs"
 	"github.com/example/thule/internal/webhook"
 )
 
 func TestWebhookToQueueIntegration(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), vcs.NewMemoryApprover())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	h := webhook.NewHandler("", orch)
 
 	server := httptest.NewServer(h)

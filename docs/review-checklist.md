@@ -31,13 +31,6 @@ This checklist reviews implementation against `docs/thule-architecture-roadmap.m
 - Conflicting MRs touching same folder receive lock conflict errors.
 - Close/merge events release locks for the owning MR.
 
-## 3.6) Optional approval behavior
-
-**Yes (optional in-memory prototype).**
-
-- Successful plans can mark MR as approved.
-- Lock conflicts and planning failures request changes.
-
 ## 4) Phase alignment
 
 - Phase 0: service skeleton + schema + webhook/queue foundation ✅

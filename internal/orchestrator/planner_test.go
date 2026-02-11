@@ -32,8 +32,7 @@ func TestPlannerPlanForEvent(t *testing.T) {
 	comments := vcs.NewMemoryCommentStore()
 	statuses := vcs.NewMemoryStatusPublisher()
 	runs := run.NewMemoryStore()
-	approver := vcs.NewMemoryApprover()
-	planner := NewPlanner(repo, cluster, comments, statuses, runs, policy.NewBuiltinEvaluator(), approver)
+	planner := NewPlanner(repo, cluster, comments, statuses, runs, policy.NewBuiltinEvaluator())
 
 	evt := MergeRequestEvent{MergeReqID: 10, HeadSHA: "abc", ChangedFiles: []string{"apps/payments/manifests/cm.yaml"}}
 	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
@@ -52,15 +51,12 @@ func TestPlannerPlanForEvent(t *testing.T) {
 	if got := runs.List(10, 1, 10); len(got) != 1 || got[0].State != run.StateSuccess {
 		t.Fatalf("expected successful run record, got %+v", got)
 	}
-	if approvals := approver.ListApprovals(10); len(approvals) == 0 || approvals[len(approvals)-1].Decision != vcs.DecisionApproved {
-		t.Fatalf("expected approval on successful plan: %+v", approvals)
-	}
 }
 
 func TestPlannerSkipsMissingConfig(t *testing.T) {
 	repo := t.TempDir()
 	comments := vcs.NewMemoryCommentStore()
-	planner := NewPlanner(repo, &MemoryClusterReader{}, comments, nil, nil, nil, nil)
+	planner := NewPlanner(repo, &MemoryClusterReader{}, comments, nil, nil, nil)
 	evt := MergeRequestEvent{MergeReqID: 11, HeadSHA: "abc", ChangedFiles: []string{"apps/ghost/file.yaml"}}
 	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -76,7 +72,7 @@ func (e *errCluster) ListResources(_ context.Context, _, _ string) ([]render.Res
 	return nil, os.ErrPermission
 }
 
-func TestPlannerSetsFailedStatusAndRequestsChangesOnClusterError(t *testing.T) {
+func TestPlannerSetsFailedStatusOnClusterError(t *testing.T) {
 	repo := t.TempDir()
 	projectDir := filepath.Join(repo, "apps", "payments")
 	if err := os.MkdirAll(filepath.Join(projectDir, "manifests"), 0o755); err != nil {
@@ -93,8 +89,7 @@ func TestPlannerSetsFailedStatusAndRequestsChangesOnClusterError(t *testing.T) {
 	comments := vcs.NewMemoryCommentStore()
 	statuses := vcs.NewMemoryStatusPublisher()
 	runs := run.NewMemoryStore()
-	approver := vcs.NewMemoryApprover()
-	planner := NewPlanner(repo, &errCluster{}, comments, statuses, runs, policy.NewBuiltinEvaluator(), approver)
+	planner := NewPlanner(repo, &errCluster{}, comments, statuses, runs, policy.NewBuiltinEvaluator())
 	evt := MergeRequestEvent{MergeReqID: 22, HeadSHA: "abc", ChangedFiles: []string{"apps/payments/manifests/cm.yaml"}}
 	if err := planner.PlanForEvent(context.Background(), evt); err == nil {
 		t.Fatal("expected error")
@@ -107,16 +102,13 @@ func TestPlannerSetsFailedStatusAndRequestsChangesOnClusterError(t *testing.T) {
 	if len(rr) != 1 || rr[0].State != run.StateFailed {
 		t.Fatalf("expected failed run, got %+v", rr)
 	}
-	if approvals := approver.ListApprovals(22); len(approvals) == 0 || approvals[len(approvals)-1].Decision != vcs.DecisionRequestChanges {
-		t.Fatalf("expected request changes on plan failure: %+v", approvals)
-	}
 }
 
 func TestPlannerStaleRunStopsEarly(t *testing.T) {
 	repo := t.TempDir()
 	runs := run.NewMemoryStore()
 	runs.SetLatestSHA(99, "newer")
-	planner := NewPlanner(repo, &MemoryClusterReader{}, vcs.NewMemoryCommentStore(), vcs.NewMemoryStatusPublisher(), runs, nil, nil)
+	planner := NewPlanner(repo, &MemoryClusterReader{}, vcs.NewMemoryCommentStore(), vcs.NewMemoryStatusPublisher(), runs, nil)
 	evt := MergeRequestEvent{MergeReqID: 99, HeadSHA: "older", ChangedFiles: []string{"apps/a/x.yaml"}}
 	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
 		t.Fatalf("expected no error on stale early exit: %v", err)
