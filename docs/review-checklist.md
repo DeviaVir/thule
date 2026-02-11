@@ -23,6 +23,14 @@ This checklist reviews implementation against `docs/thule-architecture-roadmap.m
 - Merge request webhooks are translated to plan events.
 - Note events with `/thule plan` are routed as manual plan triggers.
 
+## 3.5) Atlantis-style project locking
+
+**Yes (memory-backed prototype).**
+
+- MR events attempt to acquire locks per discovered project root.
+- Conflicting MRs touching same folder receive lock conflict errors.
+- Close/merge events release locks for the owning MR.
+
 ## 4) Phase alignment
 
 - Phase 0: service skeleton + schema + webhook/queue foundation ✅

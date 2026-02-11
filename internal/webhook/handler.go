@@ -95,7 +95,15 @@ func decodeEvent(body []byte) (orchestrator.MergeRequestEvent, error) {
 		if head == "" {
 			head = str(payload["head_sha"])
 		}
-		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: "merge_request.updated", Repository: repo, MergeReqID: mrID, HeadSHA: head, ChangedFiles: changed}, nil
+		eventType := "merge_request.updated"
+		action := strings.ToLower(str(attrs["action"]))
+		state := strings.ToLower(str(attrs["state"]))
+		if action == "close" || state == "closed" {
+			eventType = "merge_request.closed"
+		} else if action == "merge" || state == "merged" {
+			eventType = "merge_request.merged"
+		}
+		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: eventType, Repository: repo, MergeReqID: mrID, HeadSHA: head, ChangedFiles: changed}, nil
 	case "note":
 		attrs, _ := payload["object_attributes"].(map[string]any)
 		note := strings.TrimSpace(str(attrs["note"]))

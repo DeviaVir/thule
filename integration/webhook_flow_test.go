@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
@@ -18,7 +19,7 @@ import (
 func TestWebhookToQueueIntegration(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store)
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	h := webhook.NewHandler("", orch)
 
 	server := httptest.NewServer(h)

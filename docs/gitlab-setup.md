@@ -60,3 +60,13 @@ Thule routes this into a `comment.plan` planning event.
   "object_attributes": {"note": "/thule plan"}
 }
 ```
+
+## Project lock behavior (Atlantis-style)
+
+When a merge request changes files under a Thule project folder, Thule attempts to lock that project path for the MR.
+
+- Lock key: `<repository>/<project-root>`
+- Owner: MR IID
+- Conflict behavior: a second MR touching the same project path is rejected until lock owner closes/merges and a close event releases locks.
+
+This mirrors Atlantis-style project-level serialization and prevents conflicting concurrent plan pipelines for the same folder.

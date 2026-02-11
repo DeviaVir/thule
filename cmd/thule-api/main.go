@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
@@ -17,7 +18,7 @@ func main() {
 
 	jobs := queue.NewMemoryQueue(100)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store)
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	handler := webhook.NewHandler(secret, orch)
 
 	mux := http.NewServeMux()

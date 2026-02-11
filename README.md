@@ -7,6 +7,7 @@ It watches Merge Request changes, renders desired Kubernetes resources, diffs ag
 ## Current capabilities
 
 - MR webhook ingestion and deduplicated queueing.
+- Atlantis-style project locking: changed project folders are locked per MR to prevent conflicting parallel plans.
 - Changed-file project discovery with per-project `thule.yaml`.
 - Rendering modes: `yaml`, `kustomize` (path-based), `helm` (rendered YAML input), `flux` (kind-aware filtering).
 - Diffing with create/patch/delete/no-op actions, ignore paths, prune control, risk tags.
@@ -72,7 +73,7 @@ comment:
 
 ## GitLab integration
 
-See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples and `/thule plan` comment command routing.
+See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples, `/thule plan` comment command routing, and lock behavior notes.
 
 ## Architecture and implementation phases
 

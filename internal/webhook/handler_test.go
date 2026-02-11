@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
@@ -19,7 +20,7 @@ import (
 func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store)
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	h := NewHandler("", orch)
 
 	payload := []byte(`{
@@ -64,7 +65,7 @@ func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {
 func TestWebhookSupportsGitLabMergeRequestAndCommandEvents(t *testing.T) {
 	jobs := queue.NewMemoryQueue(3)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store)
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	h := NewHandler("", orch)
 
 	mrPayload := []byte(`{
@@ -107,7 +108,7 @@ func TestWebhookSupportsGitLabMergeRequestAndCommandEvents(t *testing.T) {
 }
 
 func TestWebhookRejectsInvalidMethod(t *testing.T) {
-	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore()))
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
 
@@ -118,7 +119,7 @@ func TestWebhookRejectsInvalidMethod(t *testing.T) {
 }
 
 func TestWebhookRejectsInvalidPayload(t *testing.T) {
-	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore()))
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString("not-json"))
 
@@ -130,7 +131,7 @@ func TestWebhookRejectsInvalidPayload(t *testing.T) {
 
 func TestWebhookSignatureValidation(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
-	h := NewHandler("supersecret", orchestrator.New(jobs, storage.NewMemoryDeliveryStore()))
+	h := NewHandler("supersecret", orchestrator.New(jobs, storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
 
 	payload := []byte(`{
 		"delivery_id":"d-2",
@@ -163,4 +164,28 @@ func TestWebhookSignatureValidation(t *testing.T) {
 			t.Fatalf("expected 401, got %d", rr.Code)
 		}
 	})
+}
+
+func TestWebhookParsesGitLabCloseEventType(t *testing.T) {
+	jobs := queue.NewMemoryQueue(1)
+	store := storage.NewMemoryDeliveryStore()
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	h := NewHandler("", orch)
+
+	payload := []byte(`{
+		"object_kind":"merge_request",
+		"event_id":"evt-close",
+		"project":{"path_with_namespace":"group/repo"},
+		"object_attributes":{"iid":7,"action":"close","last_commit":{"id":"sha777"}}
+	}`)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload)))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rr.Code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := jobs.Dequeue(ctx); err == nil {
+		t.Fatal("expected no queued job for close event")
+	}
 }
