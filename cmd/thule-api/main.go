@@ -16,7 +16,10 @@ func main() {
 	addr := getEnv("THULE_API_ADDR", ":8080")
 	secret := os.Getenv("THULE_WEBHOOK_SECRET")
 
-	jobs := queue.NewMemoryQueue(100)
+	jobs, err := queue.FromEnv()
+	if err != nil {
+		log.Fatalf("queue init failed: %v", err)
+	}
 	store := storage.NewMemoryDeliveryStore()
 	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
 	handler := webhook.NewHandler(secret, orch)

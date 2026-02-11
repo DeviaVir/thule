@@ -11,6 +11,7 @@ import (
 	"github.com/example/thule/internal/policy"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/render"
+	"github.com/example/thule/internal/repo"
 	"github.com/example/thule/internal/run"
 	"github.com/example/thule/internal/vcs"
 )
@@ -20,7 +21,17 @@ func main() {
 	defer stop()
 
 	repoRoot := getEnv("THULE_REPO_ROOT", ".")
-	jobs := queue.NewMemoryQueue(100)
+	jobs, err := queue.FromEnv()
+	if err != nil {
+		log.Fatalf("queue init failed: %v", err)
+	}
+	repoURL := os.Getenv("THULE_REPO_URL")
+	repoRef := getEnv("THULE_REPO_REF", "master")
+	auth, err := repo.AuthFromEnv()
+	if err != nil {
+		log.Fatalf("repo auth failed: %v", err)
+	}
+	syncer := repo.NewSyncer(repoURL, repoRef, repoRoot, auth)
 	comments := vcs.NewMemoryCommentStore()
 	statuses := vcs.NewMemoryStatusPublisher()
 	runs := run.NewMemoryStore()
@@ -35,6 +46,12 @@ func main() {
 		if err != nil {
 			log.Printf("worker exiting: %v", err)
 			return
+		}
+		if syncer.Enabled() {
+			if err := syncer.Sync(ctx, job.HeadSHA); err != nil {
+				log.Printf("repo sync failed delivery=%s mr=%d sha=%s err=%v", job.DeliveryID, job.MergeReqID, job.HeadSHA, err)
+				continue
+			}
 		}
 		evt := orchestrator.MergeRequestEvent{
 			DeliveryID:   job.DeliveryID,
