@@ -79,10 +79,16 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 		}
 
 		body := report.BuildPlanComment(cfg.Project, evt.HeadSHA, changes, summary, findings, cfg.Comment.MaxResourceDetails)
-		c := p.comments.PostOrSupersede(evt.MergeReqID, body)
+		var commentID int64
+		if p.comments != nil {
+			c := p.comments.PostOrSupersede(evt.MergeReqID, body)
+			commentID = c.ID
+		}
 		if p.runs != nil {
 			p.runs.AddArtifact(rr.ID, "plan-comment", body)
-			p.runs.AddArtifact(rr.ID, "comment-id", fmt.Sprintf("%d", c.ID))
+			if commentID > 0 {
+				p.runs.AddArtifact(rr.ID, "comment-id", fmt.Sprintf("%d", commentID))
+			}
 			p.runs.Complete(rr.ID, run.StateSuccess, "")
 		}
 	}

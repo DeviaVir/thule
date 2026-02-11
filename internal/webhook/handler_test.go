@@ -61,6 +61,51 @@ func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {
 	}
 }
 
+func TestWebhookSupportsGitLabMergeRequestAndCommandEvents(t *testing.T) {
+	jobs := queue.NewMemoryQueue(3)
+	store := storage.NewMemoryDeliveryStore()
+	orch := orchestrator.New(jobs, store)
+	h := NewHandler("", orch)
+
+	mrPayload := []byte(`{
+		"object_kind":"merge_request",
+		"event_id":"evt-1",
+		"project":{"path_with_namespace":"group/repo"},
+		"changed_files":["apps/p1/deploy.yaml"],
+		"object_attributes":{"iid":7,"last_commit":{"id":"sha777"}}
+	}`)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(mrPayload)))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rr.Code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	job, err := jobs.Dequeue(ctx)
+	if err != nil || job.MergeReqID != 7 || job.EventType != "merge_request.updated" {
+		t.Fatalf("unexpected MR job: %+v err=%v", job, err)
+	}
+
+	cmdPayload := []byte(`{
+		"object_kind":"note",
+		"event_id":"evt-2",
+		"project":{"path_with_namespace":"group/repo"},
+		"merge_request":{"iid":7,"last_commit":"sha777"},
+		"object_attributes":{"note":"/thule plan"}
+	}`)
+	rr2 := httptest.NewRecorder()
+	h.ServeHTTP(rr2, httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(cmdPayload)))
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for /thule command, got %d", rr2.Code)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	job2, err := jobs.Dequeue(ctx2)
+	if err != nil || job2.EventType != "comment.plan" {
+		t.Fatalf("unexpected command job: %+v err=%v", job2, err)
+	}
+}
+
 func TestWebhookRejectsInvalidMethod(t *testing.T) {
 	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore()))
 	rr := httptest.NewRecorder()
