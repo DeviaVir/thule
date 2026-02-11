@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thule.dev/schemas/thule.schema.json",
+  "title": "Thule Project Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project", "clusterRef", "namespace", "render"],
+  "properties": {
+    "version": {"const": "v1"},
+    "project": {"type": "string", "minLength": 1},
+    "clusterRef": {"type": "string", "minLength": 1},
+    "namespace": {"type": "string", "minLength": 1},
+    "render": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "path"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["yaml", "kustomize", "helm", "flux"]},
+        "path": {"type": "string", "minLength": 1}
+      }
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prune": {"type": "boolean"},
+        "ignoreFields": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {"type": "string"}
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxResourceDetails": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

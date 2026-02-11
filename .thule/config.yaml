@@ -1,0 +1,10 @@
+version: v1
+vcs:
+  provider: gitlab
+  webhookEvents:
+    - merge_request.opened
+    - merge_request.updated
+    - merge_request.reopened
+execution:
+  queue: memory
+  dedupeByDeliveryID: true

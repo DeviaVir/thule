@@ -1,0 +1,31 @@
+name: unit-tests
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests with coverage
+        run: |
+          go test ./internal/... ./pkg/... -covermode=atomic -coverprofile=unit.out
+
+      - name: Enforce >=90% unit coverage
+        run: ./scripts/check_coverage.sh 90 unit.out
+
+      - name: Upload unit coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: unit.out
