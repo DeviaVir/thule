@@ -8,6 +8,7 @@ import (
 	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/queue"
 	"github.com/example/thule/internal/storage"
+	"github.com/example/thule/internal/vcs"
 )
 
 func baseEvent() MergeRequestEvent {
@@ -17,7 +18,7 @@ func baseEvent() MergeRequestEvent {
 func TestHandleMergeRequestEventQueuesJob(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), vcs.NewMemoryApprover())
 	event := baseEvent()
 
 	if err := svc.HandleMergeRequestEvent(context.Background(), event); err != nil {
@@ -38,7 +39,7 @@ func TestHandleMergeRequestEventQueuesJob(t *testing.T) {
 func TestHandleMergeRequestEventRejectsInvalidEvents(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), vcs.NewMemoryApprover())
 
 	tests := []MergeRequestEvent{{}, {DeliveryID: "d", Repository: "org/repo", MergeReqID: 1, HeadSHA: "a"}}
 	for _, tc := range tests {
@@ -51,7 +52,7 @@ func TestHandleMergeRequestEventRejectsInvalidEvents(t *testing.T) {
 func TestHandleMergeRequestEventDeduplicatesByDeliveryID(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), vcs.NewMemoryApprover())
 	event := baseEvent()
 
 	if err := svc.HandleMergeRequestEvent(context.Background(), event); err != nil {
@@ -62,10 +63,11 @@ func TestHandleMergeRequestEventDeduplicatesByDeliveryID(t *testing.T) {
 	}
 }
 
-func TestHandleMergeRequestEventReleasesReservationOnEnqueueFailure(t *testing.T) {
+func TestHandleMergeRequestEventReleasesReservationOnEnqueueFailureAndRequestsChanges(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	approver := vcs.NewMemoryApprover()
+	svc := New(jobs, store, lock.NewMemoryLocker(), approver)
 
 	if err := jobs.Enqueue(context.Background(), queue.Job{DeliveryID: "prefill"}); err != nil {
 		t.Fatalf("prefill failed: %v", err)
@@ -80,13 +82,17 @@ func TestHandleMergeRequestEventReleasesReservationOnEnqueueFailure(t *testing.T
 	if !store.Reserve(event.DeliveryID) {
 		t.Fatal("delivery id should be reservable again after enqueue failure")
 	}
+	if approvals := approver.ListApprovals(event.MergeReqID); len(approvals) == 0 || approvals[0].Decision != vcs.DecisionRequestChanges {
+		t.Fatalf("expected request changes approval after enqueue failure: %+v", approvals)
+	}
 }
 
-func TestHandleMergeRequestEventProjectLockConflict(t *testing.T) {
+func TestHandleMergeRequestEventProjectLockConflictRequestsChanges(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
 	locker := lock.NewMemoryLocker()
-	svc := New(jobs, store, locker)
+	approver := vcs.NewMemoryApprover()
+	svc := New(jobs, store, locker, approver)
 
 	e1 := baseEvent()
 	e1.DeliveryID = "evt1"
@@ -101,13 +107,16 @@ func TestHandleMergeRequestEventProjectLockConflict(t *testing.T) {
 	if err := svc.HandleMergeRequestEvent(context.Background(), e2); err == nil {
 		t.Fatal("expected lock conflict error")
 	}
+	if approvals := approver.ListApprovals(2); len(approvals) == 0 || approvals[0].Decision != vcs.DecisionRequestChanges {
+		t.Fatalf("expected request changes on lock conflict: %+v", approvals)
+	}
 }
 
 func TestHandleMergeRequestEventCloseReleasesLocks(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
 	locker := lock.NewMemoryLocker()
-	svc := New(jobs, store, locker)
+	svc := New(jobs, store, locker, vcs.NewMemoryApprover())
 
 	e1 := baseEvent()
 	e1.DeliveryID = "evt1"

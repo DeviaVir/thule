@@ -26,7 +26,7 @@ func main() {
 	runs := run.NewMemoryStore()
 	cluster := &orchestrator.MemoryClusterReader{ByClusterNS: map[string][]render.Resource{}}
 
-	planner := orchestrator.NewPlanner(repoRoot, cluster, comments, statuses, runs, policy.NewBuiltinEvaluator())
+	planner := orchestrator.NewPlanner(repoRoot, cluster, comments, statuses, runs, policy.NewBuiltinEvaluator(), vcs.NewMemoryApprover())
 
 	log.Printf("thule-worker started repo=%s", repoRoot)
 

@@ -70,3 +70,10 @@ When a merge request changes files under a Thule project folder, Thule attempts 
 - Conflict behavior: a second MR touching the same project path is rejected until lock owner closes/merges and a close event releases locks.
 
 This mirrors Atlantis-style project-level serialization and prevents conflicting concurrent plan pipelines for the same folder.
+
+## Optional approval behavior
+
+When approval integration is enabled, Thule can publish MR approval decisions:
+
+- `approved`: plan succeeded and lock checks passed.
+- `request_changes`: lock conflict or plan failure occurred.
