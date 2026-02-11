@@ -76,6 +76,10 @@ comment:
 
 See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples, `/thule plan` comment command routing, and lock behavior notes.
 
+## Cluster credential examples
+
+See [docs/cluster-access-examples.md](docs/cluster-access-examples.md) for `thule.yaml` examples that target GKE and bare-metal clusters, plus an example external cluster credential catalog keyed by `clusterRef`.
+
 ## Architecture and implementation phases
 
 - Architecture plan: [docs/thule-architecture-roadmap.md](docs/thule-architecture-roadmap.md)
