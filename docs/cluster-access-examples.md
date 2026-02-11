@@ -1,9 +1,9 @@
 # Cluster access configuration examples
 
-Thule project config (`thule.yaml`) intentionally does **not** carry secret material.
-Use `clusterRef` in `thule.yaml` and resolve credentials out-of-band in Thule control-plane config.
+Thule project config (`thule.conf`) intentionally does **not** carry secret material.
+Use `clusterRef` in `thule.conf` and resolve credentials out-of-band in Thule control-plane config.
 
-## 1) Per-project `thule.yaml` (GKE target)
+## 1) Per-project `thule.conf` (GKE target)
 
 ```yaml
 version: v1
@@ -17,7 +17,7 @@ policy:
   profile: strict
 ```
 
-## 2) Per-project `thule.yaml` (bare-metal target)
+## 2) Per-project `thule.conf` (bare-metal target)
 
 ```yaml
 version: v1
@@ -31,7 +31,7 @@ policy:
   profile: baseline
 ```
 
-## 3) Example control-plane cluster credential catalog (outside `thule.yaml`)
+## 3) Example control-plane cluster credential catalog (outside `thule.conf`)
 
 Example-only format showing how one Thule deployment can resolve both GKE and bare-metal credentials by `clusterRef`.
 

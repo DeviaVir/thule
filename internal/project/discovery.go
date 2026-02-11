@@ -10,6 +10,8 @@ type DiscoveredProject struct {
 	ConfigPath string
 }
 
+const configFilename = "thule.conf"
+
 func DiscoverFromChangedFiles(changedFiles []string) []DiscoveredProject {
 	uniq := map[string]struct{}{}
 	for _, p := range changedFiles {
@@ -18,7 +20,7 @@ func DiscoverFromChangedFiles(changedFiles []string) []DiscoveredProject {
 		}
 		dir := filepath.Dir(filepath.Clean(p))
 		for {
-			candidate := filepath.Join(dir, "thule.yaml")
+			candidate := filepath.Join(dir, configFilename)
 			uniq[candidate] = struct{}{}
 			if dir == "." || dir == "/" {
 				break

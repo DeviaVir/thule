@@ -20,7 +20,7 @@ func TestPlannerPlanForEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := "version: v1\nproject: payments\nclusterRef: prod\nnamespace: payments\npolicy:\n  profile: strict\nrender:\n  mode: yaml\n  path: manifests\n"
-	if err := os.WriteFile(filepath.Join(projectDir, "thule.yaml"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "thule.conf"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: cm\n  namespace: payments\n"
@@ -79,7 +79,7 @@ func TestPlannerSetsFailedStatusOnClusterError(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := "version: v1\nproject: payments\nclusterRef: prod\nnamespace: payments\nrender:\n  mode: yaml\n  path: manifests\n"
-	if err := os.WriteFile(filepath.Join(projectDir, "thule.yaml"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "thule.conf"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"

@@ -1,6 +1,6 @@
 package thuleconfig
 
-// Config defines project-level thule.yaml settings.
+// Config defines project-level thule.conf settings.
 type Config struct {
 	Version    string  `json:"version"`
 	Project    string  `json:"project"`

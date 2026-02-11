@@ -31,7 +31,7 @@ func TestValidateBytesRejectsInvalidConfigs(t *testing.T) {
 
 func TestLoadReadsAndValidatesFile(t *testing.T) {
 	tempDir := t.TempDir()
-	path := filepath.Join(tempDir, "thule.yaml")
+	path := filepath.Join(tempDir, "thule.conf")
 	payload := "version: v1\nproject: payments\nclusterRef: prod-eu-1\nnamespace: payments\nrender:\n  mode: yaml\n  path: ./manifests\n"
 	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)

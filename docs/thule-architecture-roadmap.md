@@ -23,7 +23,7 @@
 ## 2. User Workflow (v1)
 
 1. Developer opens or updates an MR changing manifests under a configured folder.
-2. Thule detects affected deployment units and resolves target cluster(s) from local config (e.g., `thule.yaml`).
+2. Thule detects affected deployment units and resolves target cluster(s) from local config (e.g., `thule.conf`).
 3. Thule renders manifests (raw YAML / Kustomize / Helm / Flux artifacts where applicable).
 4. Thule performs a read-only compare against live cluster objects.
 5. Thule posts an MR comment with:
@@ -52,7 +52,7 @@
    - Identifies changed paths and impacted Thule projects.
 
 4. **Project Resolver**
-   - Reads per-folder config (e.g., `thule.yaml`).
+   - Reads per-folder config (e.g., `thule.conf`).
    - Resolves cluster context, namespace scopes, render mode, policy profiles.
 
 5. **Renderer Engine**
@@ -103,7 +103,7 @@
 Use a per-project config file, e.g.:
 
 ```yaml
-# apps/payments/thule.yaml
+# apps/payments/thule.conf
 version: v1
 project: payments-app
 clusterRef: prod-eu-1
@@ -129,7 +129,7 @@ comment:
 
 1. Global org defaults.
 2. Repo-level `.thule/config.yaml`.
-3. Project-level `thule.yaml`.
+3. Project-level `thule.conf`.
 4. MR overrides via labels/comments (allowlist only).
 
 ---
@@ -139,7 +139,7 @@ comment:
 1. **Event intake**
    - Trigger on MR open/update/reopen + optional `/thule plan` comment command.
 2. **Change detection**
-   - Map changed files to project roots containing `thule.yaml`.
+   - Map changed files to project roots containing `thule.conf`.
 3. **Execution graph**
    - Fan out one job per impacted project/cluster pair.
 4. **Render + diff**
@@ -272,7 +272,7 @@ pkg/
 ## Phase 0 — Foundations (1–2 weeks)
 
 - Finalize product scope and terminology.
-- Define `thule.yaml` schema + JSONSchema validation.
+- Define `thule.conf` schema + JSONSchema validation.
 - Choose VCS target first (GitLab or GitHub) and design adapter interface.
 - Establish local dev harness with kind cluster + fixture repo.
 
@@ -335,7 +335,7 @@ pkg/
 
 Start with **Phase 1 slice**:
 
-- implement `thule.yaml` parser + validator,
+- implement `thule.conf` parser + validator,
 - webhook ingestion for MR synchronize events,
 - project discovery from changed files,
 - YAML/Kustomize render + normalized diff,

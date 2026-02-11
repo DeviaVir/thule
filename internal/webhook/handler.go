@@ -36,7 +36,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if len(h.secret) > 0 {
 		signature := strings.TrimPrefix(r.Header.Get("X-Thule-Signature"), "sha256=")
-		if !verifySignature(h.secret, body, signature) {
+		gitlabToken := r.Header.Get("X-Gitlab-Token")
+		if !verifySignature(h.secret, body, signature) && !verifyToken(h.secret, gitlabToken) {
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
@@ -46,6 +47,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
+	}
+	if event.DeliveryID == "" {
+		event.DeliveryID = firstHeader(r, "X-Gitlab-Event-UUID", "X-Request-Id", "X-Delivery-Id")
 	}
 
 	if err := h.orch.HandleMergeRequestEvent(r.Context(), event); err != nil {
@@ -112,7 +116,13 @@ func decodeEvent(body []byte) (orchestrator.MergeRequestEvent, error) {
 		}
 		mr, _ := payload["merge_request"].(map[string]any)
 		mrID := int64(num(mr["iid"]))
-		head := str(mr["last_commit"]) // fallback textual
+		head := ""
+		if lc, ok := mr["last_commit"].(map[string]any); ok {
+			head = str(lc["id"])
+		}
+		if head == "" {
+			head = str(mr["last_commit"]) // fallback textual
+		}
 		if head == "" {
 			head = str(payload["head_sha"])
 		}
@@ -149,4 +159,20 @@ func verifySignature(secret, body []byte, provided string) bool {
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(provided))
+}
+
+func verifyToken(secret []byte, provided string) bool {
+	if provided == "" {
+		return false
+	}
+	return hmac.Equal(secret, []byte(provided))
+}
+
+func firstHeader(r *http.Request, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(r.Header.Get(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

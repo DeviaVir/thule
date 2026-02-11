@@ -173,6 +173,47 @@ func TestWebhookSignatureValidation(t *testing.T) {
 			t.Fatalf("expected 401, got %d", rr.Code)
 		}
 	})
+
+	t.Run("gitlab-token", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload))
+		req.Header.Set("X-Gitlab-Token", "supersecret")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("expected 202, got %d", rr.Code)
+		}
+	})
+
+	t.Run("gitlab-token-invalid", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload))
+		req.Header.Set("X-Gitlab-Token", "wrong")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d", rr.Code)
+		}
+	})
+}
+
+func TestWebhookUsesHeaderDeliveryID(t *testing.T) {
+	jobs := queue.NewMemoryQueue(1)
+	store := storage.NewMemoryDeliveryStore()
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	h := NewHandler("", orch)
+
+	payload := []byte(`{
+		"object_kind":"merge_request",
+		"project":{"path_with_namespace":"org/repo"},
+		"object_attributes":{"iid":42,"last_commit":{"id":"abc123"}}
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload))
+	req.Header.Set("X-Gitlab-Event-UUID", "uuid-123")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rr.Code)
+	}
 }
 
 func TestWebhookParsesGitLabCloseEventType(t *testing.T) {

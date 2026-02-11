@@ -9,7 +9,7 @@ It watches Merge Request changes, renders desired Kubernetes resources, diffs ag
 
 - MR webhook ingestion and deduplicated queueing.
 - Atlantis-style project locking: changed project folders are locked per MR to prevent conflicting parallel plans.
-- Changed-file project discovery with per-project `thule.yaml`.
+- Changed-file project discovery with per-project `thule.conf`.
 - Rendering modes: `yaml`, `kustomize` (path-based), `helm` (rendered YAML input), `flux` (kind-aware filtering).
 - Diffing with create/patch/delete/no-op actions, ignore paths, prune control, risk tags.
 - Policy findings integrated into plan comments.
@@ -34,7 +34,7 @@ go test ./...
 go run ./cmd/thule plan --project ./apps/payments --sha local
 ```
 
-This reads `./apps/payments/thule.yaml`, renders manifests, runs diff/policy, and prints the same style plan comment body.
+This reads `./apps/payments/thule.conf`, renders manifests, runs diff/policy, and prints the same style plan comment body.
 
 ### 4) Run API
 
@@ -48,7 +48,7 @@ THULE_API_ADDR=:8080 THULE_WEBHOOK_SECRET=supersecret go run ./cmd/thule-api
 THULE_REPO_ROOT=$(pwd) go run ./cmd/thule-worker
 ```
 
-## Configuration (`thule.yaml`)
+## Configuration (`thule.conf`)
 
 ```yaml
 version: v1
@@ -78,7 +78,7 @@ See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples, `/t
 
 ## Cluster credential examples
 
-See [docs/cluster-access-examples.md](docs/cluster-access-examples.md) for `thule.yaml` examples that target GKE and bare-metal clusters, plus an example external cluster credential catalog keyed by `clusterRef`.
+See [docs/cluster-access-examples.md](docs/cluster-access-examples.md) for `thule.conf` examples that target GKE and bare-metal clusters, plus an example external cluster credential catalog keyed by `clusterRef`.
 
 ## Architecture and implementation phases
 

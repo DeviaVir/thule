@@ -19,7 +19,7 @@ func TestMainPlanCommand(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	cfg := "version: v1\nproject: demo\nclusterRef: demo-cluster\nnamespace: default\nrender:\n  mode: yaml\n  path: manifests\n"
-	if err := os.WriteFile(filepath.Join(dir, "thule.yaml"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "thule.conf"), []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

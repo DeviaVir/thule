@@ -30,11 +30,11 @@ func main() {
 
 func runPlan(args []string) {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
-	project := fs.String("project", ".", "project directory containing thule.yaml")
+	project := fs.String("project", ".", "project directory containing thule.conf")
 	sha := fs.String("sha", "local", "commit sha label for report output")
 	fs.Parse(args)
 
-	cfgPath := filepath.Join(*project, "thule.yaml")
+	cfgPath := filepath.Join(*project, "thule.conf")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
