@@ -19,7 +19,7 @@ func TestMemoryQueueEnqueueDequeue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dequeue failed: %v", err)
 	}
-	if got != want {
+	if got.DeliveryID != want.DeliveryID || got.EventType != want.EventType || got.Repository != want.Repository || got.MergeReqID != want.MergeReqID || got.HeadSHA != want.HeadSHA {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }

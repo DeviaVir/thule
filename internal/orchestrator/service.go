@@ -9,11 +9,12 @@ import (
 )
 
 type MergeRequestEvent struct {
-	DeliveryID string `json:"delivery_id"`
-	EventType  string `json:"event_type"`
-	Repository string `json:"repository"`
-	MergeReqID int64  `json:"merge_request_id"`
-	HeadSHA    string `json:"head_sha"`
+	DeliveryID   string   `json:"delivery_id"`
+	EventType    string   `json:"event_type"`
+	Repository   string   `json:"repository"`
+	MergeReqID   int64    `json:"merge_request_id"`
+	HeadSHA      string   `json:"head_sha"`
+	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 type Service struct {
@@ -33,16 +34,22 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 		return fmt.Errorf("missing required event fields")
 	}
 
-	if s.store.Seen(event.DeliveryID) {
+	if !s.store.Reserve(event.DeliveryID) {
 		return nil
 	}
 
-	s.store.MarkSeen(event.DeliveryID)
-	return s.jobs.Enqueue(ctx, queue.Job{
-		DeliveryID: event.DeliveryID,
-		EventType:  event.EventType,
-		Repository: event.Repository,
-		MergeReqID: event.MergeReqID,
-		HeadSHA:    event.HeadSHA,
-	})
+	if err := s.jobs.Enqueue(ctx, queue.Job{
+		DeliveryID:   event.DeliveryID,
+		EventType:    event.EventType,
+		Repository:   event.Repository,
+		MergeReqID:   event.MergeReqID,
+		HeadSHA:      event.HeadSHA,
+		ChangedFiles: event.ChangedFiles,
+	}); err != nil {
+		s.store.Release(event.DeliveryID)
+		return err
+	}
+
+	s.store.Commit(event.DeliveryID)
+	return nil
 }

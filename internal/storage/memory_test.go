@@ -2,17 +2,31 @@ package storage
 
 import "testing"
 
-func TestMemoryDeliveryStoreSeenLifecycle(t *testing.T) {
+func TestMemoryDeliveryStoreLifecycle(t *testing.T) {
 	s := NewMemoryDeliveryStore()
 	id := "delivery-123"
 
-	if s.Seen(id) {
-		t.Fatal("expected unseen id before mark")
+	if !s.Reserve(id) {
+		t.Fatal("expected reserve to succeed")
+	}
+	if s.Reserve(id) {
+		t.Fatal("expected duplicate reserve to fail")
+	}
+	if !s.Seen(id) {
+		t.Fatal("expected seen after reserve")
 	}
 
-	s.MarkSeen(id)
+	s.Release(id)
+	if s.Seen(id) {
+		t.Fatal("expected release to clear pending reservation")
+	}
 
+	if !s.Reserve(id) {
+		t.Fatal("expected reserve to succeed again after release")
+	}
+	s.Commit(id)
+	s.Release(id)
 	if !s.Seen(id) {
-		t.Fatal("expected seen id after mark")
+		t.Fatal("expected committed id to remain seen")
 	}
 }

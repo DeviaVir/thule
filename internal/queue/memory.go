@@ -3,11 +3,12 @@ package queue
 import "context"
 
 type Job struct {
-	DeliveryID string
-	EventType  string
-	Repository string
-	MergeReqID int64
-	HeadSHA    string
+	DeliveryID   string
+	EventType    string
+	Repository   string
+	MergeReqID   int64
+	HeadSHA      string
+	ChangedFiles []string
 }
 
 type Queue interface {
