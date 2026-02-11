@@ -29,24 +29,41 @@ func TestRenderProjectYAML(t *testing.T) {
 	}
 }
 
-func TestRenderProjectUnsupportedMode(t *testing.T) {
-	_, err := RenderProject(".", thuleconfig.Config{Render: thuleconfig.Render{Mode: "helm", Path: "."}})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestRenderProjectKustomizePath(t *testing.T) {
+func TestRenderProjectHelmMode(t *testing.T) {
 	dir := t.TempDir()
+	p := filepath.Join(dir, "rendered.yaml")
 	content := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm2\n"
-	p := filepath.Join(dir, "k.yaml")
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := thuleconfig.Config{Render: thuleconfig.Render{Mode: "kustomize", Path: "k.yaml"}}
+	cfg := thuleconfig.Config{Render: thuleconfig.Render{Mode: "helm", Path: "rendered.yaml"}}
 	out, err := RenderProject(dir, cfg)
 	if err != nil || len(out) != 1 {
 		t.Fatalf("unexpected render result: %v %+v", err, out)
+	}
+}
+
+func TestRenderProjectFluxModeFilters(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "flux.yaml")
+	content := "apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nmetadata:\n  name: hr\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := thuleconfig.Config{Render: thuleconfig.Render{Mode: "flux", Path: "flux.yaml"}}
+	out, err := RenderProject(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Kind != "HelmRelease" {
+		t.Fatalf("unexpected flux filtering: %+v", out)
+	}
+}
+
+func TestRenderProjectUnsupportedMode(t *testing.T) {
+	_, err := RenderProject(".", thuleconfig.Config{Render: thuleconfig.Render{Mode: "bad", Path: "."}})
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 

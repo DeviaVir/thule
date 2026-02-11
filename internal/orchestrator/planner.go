@@ -46,8 +46,8 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 		if err != nil {
 			return err
 		}
-		changes, summary := diff.Compute(desired, actual)
-		body := report.BuildPlanComment(cfg.Project, evt.HeadSHA, changes, summary)
+		changes, summary := diff.Compute(desired, actual, diff.Options{PruneDeletes: cfg.Diff.Prune, IgnoreFields: cfg.Diff.IgnoreFields})
+		body := report.BuildPlanComment(cfg.Project, evt.HeadSHA, changes, summary, cfg.Comment.MaxResourceDetails)
 		p.comments.PostOrSupersede(evt.MergeReqID, body)
 	}
 	return nil

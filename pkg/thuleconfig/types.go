@@ -1,6 +1,6 @@
 package thuleconfig
 
-// Config defines project-level thule.yaml settings for Phase 0.
+// Config defines project-level thule.yaml settings.
 type Config struct {
 	Version    string  `json:"version"`
 	Project    string  `json:"project"`
@@ -15,6 +15,17 @@ type Config struct {
 type Render struct {
 	Mode string `json:"mode"`
 	Path string `json:"path"`
+	Helm Helm   `json:"helm,omitempty"`
+	Flux Flux   `json:"flux,omitempty"`
+}
+
+type Helm struct {
+	ReleaseName string   `json:"releaseName,omitempty"`
+	ValuesFiles []string `json:"valuesFiles,omitempty"`
+}
+
+type Flux struct {
+	IncludeKinds []string `json:"includeKinds,omitempty"`
 }
 
 type Diff struct {

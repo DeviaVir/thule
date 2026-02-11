@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/example/thule/pkg/thuleconfig"
@@ -28,13 +29,37 @@ func (r Resource) ID() string {
 func RenderProject(projectRoot string, cfg thuleconfig.Config) ([]Resource, error) {
 	target := filepath.Join(projectRoot, cfg.Render.Path)
 	switch cfg.Render.Mode {
-	case "yaml":
+	case "yaml", "kustomize", "helm":
 		return renderYAMLPath(target)
-	case "kustomize":
-		return renderYAMLPath(target)
+	case "flux":
+		resources, err := renderYAMLPath(target)
+		if err != nil {
+			return nil, err
+		}
+		return filterFluxResources(resources, cfg), nil
 	default:
-		return nil, fmt.Errorf("render mode %q not implemented in phase 1", cfg.Render.Mode)
+		return nil, fmt.Errorf("render mode %q not implemented", cfg.Render.Mode)
 	}
+}
+
+func filterFluxResources(resources []Resource, cfg thuleconfig.Config) []Resource {
+	allowed := map[string]struct{}{}
+	for _, k := range cfg.Render.Flux.IncludeKinds {
+		allowed[k] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		allowed["HelmRelease"] = struct{}{}
+		allowed["Kustomization"] = struct{}{}
+		allowed["GitRepository"] = struct{}{}
+		allowed["OCIRepository"] = struct{}{}
+	}
+	out := make([]Resource, 0, len(resources))
+	for _, r := range resources {
+		if _, ok := allowed[r.Kind]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func renderYAMLPath(path string) ([]Resource, error) {
@@ -62,6 +87,7 @@ func renderYAMLPath(path string) ([]Resource, error) {
 	} else {
 		files = append(files, path)
 	}
+	sort.Strings(files)
 
 	var out []Resource
 	for _, f := range files {
