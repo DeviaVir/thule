@@ -27,6 +27,9 @@ func TestRenderProjectYAML(t *testing.T) {
 	if len(out) != 2 || out[0].Name == "" {
 		t.Fatalf("unexpected resources: %+v", out)
 	}
+	if out[0].SourcePath == "" || out[1].SourcePath == "" {
+		t.Fatalf("expected source paths on rendered resources: %+v", out)
+	}
 }
 
 func TestRenderProjectHelmMode(t *testing.T) {
@@ -108,6 +111,64 @@ func TestParseYAMLDocumentsRejectsInvalid(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Fatalf("expected invalid manifest to be skipped, got %+v", out)
+	}
+}
+
+func TestParseYAMLDocumentsNestedKindDoesNotOverrideResourceKind(t *testing.T) {
+	content := "apiVersion: kustomize.toolkit.fluxcd.io/v1\nkind: Kustomization\nmetadata:\n  name: flux-system\n  namespace: flux-system\nspec:\n  sourceRef:\n    kind: GitRepository\n    name: flux-system\n"
+	out, err := parseYAMLDocuments(content)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected one resource, got %+v", out)
+	}
+	if out[0].Kind != "Kustomization" {
+		t.Fatalf("expected Kustomization kind, got %s", out[0].Kind)
+	}
+}
+
+func TestParseYAMLDocumentsInvalidYAMLReturnsError(t *testing.T) {
+	if _, err := parseYAMLDocuments("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ["); err == nil {
+		t.Fatal("expected yaml parse error")
+	}
+}
+
+func TestRenderProjectSkipsInvalidNonManifestYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("foo: bar\nfoo: baz\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
+	if err := os.WriteFile(filepath.Join(dir, "cm.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := RenderProject(dir, thuleconfig.Config{Render: thuleconfig.Render{Mode: "yaml", Path: "."}})
+	if err != nil {
+		t.Fatalf("expected non-manifest invalid yaml to be ignored, got %v", err)
+	}
+	if len(out) != 1 || out[0].Kind != "ConfigMap" {
+		t.Fatalf("unexpected resources: %+v", out)
+	}
+}
+
+func TestRenderProjectFailsForInvalidManifestYAML(t *testing.T) {
+	dir := t.TempDir()
+	content := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: [\n"
+	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RenderProject(dir, thuleconfig.Config{Render: thuleconfig.Render{Mode: "yaml", Path: "."}}); err == nil {
+		t.Fatal("expected parse error for malformed manifest file")
+	}
+}
+
+func TestLooksLikeKubernetesManifest(t *testing.T) {
+	if !looksLikeKubernetesManifest("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n") {
+		t.Fatal("expected manifest pattern match")
+	}
+	if looksLikeKubernetesManifest("foo: bar\nkindness: true\n") {
+		t.Fatal("did not expect non-manifest pattern match")
 	}
 }
 

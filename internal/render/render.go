@@ -2,12 +2,20 @@ package render
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/example/thule/pkg/thuleconfig"
+	"gopkg.in/yaml.v3"
+)
+
+var (
+	apiVersionPattern = regexp.MustCompile(`(?m)^apiVersion:\s*\S+`)
+	kindPattern       = regexp.MustCompile(`(?m)^kind:\s*\S+`)
 )
 
 type Resource struct {
@@ -16,6 +24,7 @@ type Resource struct {
 	Namespace  string
 	Name       string
 	Body       map[string]any
+	SourcePath string
 }
 
 func (r Resource) ID() string {
@@ -99,9 +108,12 @@ func renderYAMLPath(path string) ([]Resource, error) {
 		if err != nil {
 			return nil, err
 		}
-		res, err := parseYAMLDocuments(string(content))
+		res, err := parseYAMLDocumentsWithSource(string(content), f)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", f, err)
+			if looksLikeKubernetesManifest(string(content)) {
+				return nil, fmt.Errorf("parse %s: %w", f, err)
+			}
+			continue
 		}
 		out = append(out, res...)
 	}
@@ -109,54 +121,44 @@ func renderYAMLPath(path string) ([]Resource, error) {
 }
 
 func parseYAMLDocuments(content string) ([]Resource, error) {
-	docs := strings.Split(content, "\n---")
-	out := make([]Resource, 0, len(docs))
-	for _, d := range docs {
-		if strings.TrimSpace(d) == "" {
+	return parseYAMLDocumentsWithSource(content, "")
+}
+
+func parseYAMLDocumentsWithSource(content, sourcePath string) ([]Resource, error) {
+	dec := yaml.NewDecoder(strings.NewReader(content))
+	out := []Resource{}
+	for {
+		var doc map[string]any
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if len(doc) == 0 {
 			continue
 		}
-		r := Resource{Body: map[string]any{}}
-		section := ""
-		for _, raw := range strings.Split(d, "\n") {
-			if strings.TrimSpace(raw) == "" || strings.HasPrefix(strings.TrimSpace(raw), "#") {
-				continue
-			}
-			trim := strings.TrimSpace(raw)
-			if strings.HasSuffix(trim, ":") {
-				section = strings.TrimSuffix(trim, ":")
-				continue
-			}
-			parts := strings.SplitN(trim, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			k := strings.TrimSpace(parts[0])
-			v := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-			switch section {
-			case "metadata":
-				switch k {
-				case "name":
-					r.Name = v
-				case "namespace":
-					r.Namespace = v
-				}
-			default:
-				switch k {
-				case "apiVersion":
-					r.APIVersion = v
-				case "kind":
-					r.Kind = v
-				}
-			}
-		}
-		if r.APIVersion == "" || r.Kind == "" || r.Name == "" {
+		apiVersion, _ := doc["apiVersion"].(string)
+		kind, _ := doc["kind"].(string)
+		meta, _ := doc["metadata"].(map[string]any)
+		name, _ := meta["name"].(string)
+		namespace, _ := meta["namespace"].(string)
+		if apiVersion == "" || kind == "" || name == "" {
 			// Skip non-resource YAML (values files, kustomize configs, etc.).
 			continue
 		}
-		r.Body["apiVersion"] = r.APIVersion
-		r.Body["kind"] = r.Kind
-		r.Body["metadata"] = map[string]any{"name": r.Name, "namespace": r.Namespace}
-		out = append(out, r)
+		out = append(out, Resource{
+			APIVersion: apiVersion,
+			Kind:       kind,
+			Namespace:  namespace,
+			Name:       name,
+			Body:       doc,
+			SourcePath: sourcePath,
+		})
 	}
 	return out, nil
+}
+
+func looksLikeKubernetesManifest(content string) bool {
+	return apiVersionPattern.MatchString(content) && kindPattern.MatchString(content)
 }

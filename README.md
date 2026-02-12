@@ -48,6 +48,15 @@ THULE_API_ADDR=:8080 THULE_WEBHOOK_SECRET=supersecret go run ./cmd/thule-api
 THULE_REPO_ROOT=$(pwd) go run ./cmd/thule-worker
 ```
 
+To publish real GitLab MR comments/statuses from the worker, also set:
+
+```bash
+THULE_GITLAB_TOKEN=<token> \
+THULE_GITLAB_PROJECT_PATH=infrastructure/devops/kubernetes \
+THULE_GITLAB_BASE_URL=https://gl.blockstream.io/api/v4 \
+go run ./cmd/thule-worker
+```
+
 ## Configuration (`thule.conf`)
 
 ```yaml

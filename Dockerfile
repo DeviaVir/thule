@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.22-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /src
 
@@ -11,13 +11,14 @@ COPY . ./
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG GO_BUILD_TAGS=live
 
 ENV CGO_ENABLED=0
 
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/thule-api ./cmd/thule-api
+    go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-api ./cmd/thule-api
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/thule-worker ./cmd/thule-worker
+    go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-worker ./cmd/thule-worker
 
 FROM gcr.io/distroless/static:nonroot
 

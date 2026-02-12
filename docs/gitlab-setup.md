@@ -2,6 +2,16 @@
 
 This guide shows how to route GitLab webhook events to Thule.
 
+## Worker publishing requirements
+
+To post MR comments and commit statuses, configure the worker with:
+
+- `THULE_GITLAB_TOKEN`: GitLab token with API write access to MR notes and commit statuses.
+- `THULE_GITLAB_PROJECT_PATH`: path with namespace (for example `infrastructure/devops/kubernetes`).
+- `THULE_GITLAB_BASE_URL`: GitLab API base URL (for example `https://gl.blockstream.io/api/v4`).
+
+Without these, Thule can still plan but only uses in-memory comment/status adapters.
+
 ## Endpoint
 
 - Webhook URL: `https://<thule-host>/webhook`
@@ -70,4 +80,3 @@ When a merge request changes files under a Thule project folder, Thule attempts 
 - Conflict behavior: a second MR touching the same project path is rejected until lock owner closes/merges and a close event releases locks.
 
 This mirrors Atlantis-style project-level serialization and prevents conflicting concurrent plan pipelines for the same folder.
-

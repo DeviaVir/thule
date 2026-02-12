@@ -33,8 +33,12 @@ func ChangedFiles(repoDir, baseRef, headSHA string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("base commit: %w", err)
 	}
+	mergeBase := baseCommit
+	if bases, err := headCommit.MergeBase(baseCommit); err == nil && len(bases) > 0 {
+		mergeBase = bases[0]
+	}
 
-	patch, err := baseCommit.Patch(headCommit)
+	patch, err := mergeBase.Patch(headCommit)
 	if err != nil {
 		return nil, fmt.Errorf("diff commits: %w", err)
 	}
@@ -71,10 +75,13 @@ func resolveRef(repo *git.Repository, ref string) (plumbing.Hash, error) {
 		return plumbing.NewHash(ref), nil
 	}
 
-	candidates := []plumbing.ReferenceName{
-		plumbing.ReferenceName(ref),
-		plumbing.NewBranchReferenceName(ref),
-		plumbing.NewRemoteReferenceName("origin", ref),
+	candidates := []plumbing.ReferenceName{}
+	if strings.HasPrefix(ref, "refs/") {
+		candidates = append(candidates, plumbing.ReferenceName(ref))
+	} else {
+		// Prefer origin/<ref>; local branches can be stale in long-lived worker clones.
+		candidates = append(candidates, plumbing.NewRemoteReferenceName("origin", ref))
+		candidates = append(candidates, plumbing.NewBranchReferenceName(ref))
 	}
 	for _, name := range candidates {
 		r, err := repo.Reference(name, true)

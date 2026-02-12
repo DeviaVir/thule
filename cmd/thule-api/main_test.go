@@ -47,3 +47,36 @@ func TestMainCallsRun(t *testing.T) {
 
 	main()
 }
+
+func TestRunQueueInitError(t *testing.T) {
+	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_QUEUE_BUFFER", "bad")
+	if err := run(); err == nil {
+		t.Fatal("expected queue init error")
+	}
+}
+
+func TestRunDedupeInitError(t *testing.T) {
+	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_QUEUE_BUFFER", "1")
+	t.Setenv("THULE_DEDUPE", "memory")
+	t.Setenv("THULE_DEDUPE_TTL", "bad")
+	if err := run(); err == nil {
+		t.Fatal("expected dedupe init error")
+	}
+}
+
+func TestRunListenError(t *testing.T) {
+	t.Setenv("THULE_API_ADDR", "127.0.0.1:0")
+	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_QUEUE_BUFFER", "1")
+	t.Setenv("THULE_DEDUPE", "disabled")
+
+	orig := listenAndServe
+	t.Cleanup(func() { listenAndServe = orig })
+	listenAndServe = func(string, http.Handler) error { return http.ErrServerClosed }
+
+	if err := run(); err == nil {
+		t.Fatal("expected listen error")
+	}
+}

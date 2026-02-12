@@ -33,7 +33,7 @@ func TestRunWorkerProcessesJob(t *testing.T) {
 		got = evt
 		cancel()
 		return nil
-	})
+	}, nil)
 
 	if !called {
 		t.Fatal("expected plan function to be called")
@@ -61,7 +61,7 @@ func TestRunWorkerSyncErrorSkipsPlan(t *testing.T) {
 	err := runWorker(ctx, jobs, syncer, func(context.Context, orchestrator.MergeRequestEvent) error {
 		called = true
 		return nil
-	})
+	}, nil)
 
 	if called {
 		t.Fatal("plan should not run when sync fails")
@@ -85,6 +85,7 @@ func TestBuildWorkerFromEnv(t *testing.T) {
 	t.Setenv("THULE_QUEUE", "memory")
 	t.Setenv("THULE_REPO_URL", "https://example.com/repo.git")
 	t.Setenv("THULE_REPO_REF", "main")
+	t.Setenv("THULE_GITLAB_TOKEN", "")
 
 	deps, err := buildWorker(t.TempDir())
 	if err != nil {
@@ -100,15 +101,19 @@ func TestBuildWorkerFromEnv(t *testing.T) {
 
 func TestMainUsesRunWorkerFunc(t *testing.T) {
 	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_GITLAB_TOKEN", "")
 
 	orig := runWorkerFunc
 	t.Cleanup(func() { runWorkerFunc = orig })
 
 	called := false
-	runWorkerFunc = func(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc) error {
+	runWorkerFunc = func(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc, mrChanges mrChangedFilesFunc) error {
 		called = true
 		if jobs == nil || syncer == nil || plan == nil {
 			t.Fatal("expected worker deps to be set")
+		}
+		if mrChanges != nil {
+			t.Fatal("expected no gitlab changed-files fallback in this test")
 		}
 		return nil
 	}
@@ -117,5 +122,78 @@ func TestMainUsesRunWorkerFunc(t *testing.T) {
 
 	if !called {
 		t.Fatal("expected main to call runWorkerFunc")
+	}
+}
+
+func TestBuildWorkerGitLabEnabled(t *testing.T) {
+	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_REPO_URL", "ssh://git@gl.blockstream.io/infrastructure/devops/kubernetes")
+	t.Setenv("THULE_REPO_REF", "master")
+	t.Setenv("THULE_GITLAB_TOKEN", "test-token")
+	t.Setenv("THULE_GITLAB_BASE_URL", "https://gl.blockstream.io/api/v4")
+	t.Setenv("THULE_GITLAB_PROJECT_PATH", "infrastructure/devops/kubernetes")
+
+	deps, err := buildWorker(t.TempDir())
+	if err != nil {
+		t.Fatalf("build worker failed: %v", err)
+	}
+	if deps.jobs == nil || deps.syncer == nil || deps.plan == nil {
+		t.Fatal("expected worker dependencies to be set")
+	}
+	if deps.mrChangedFile == nil {
+		t.Fatal("expected gitlab changed-files fallback to be enabled")
+	}
+}
+
+func TestBuildWorkerGitLabConfigError(t *testing.T) {
+	t.Setenv("THULE_QUEUE", "memory")
+	t.Setenv("THULE_REPO_URL", "")
+	t.Setenv("THULE_GITLAB_TOKEN", "test-token")
+	t.Setenv("THULE_GITLAB_PROJECT_PATH", "")
+	t.Setenv("THULE_GITLAB_BASE_URL", "https://gl.blockstream.io/api/v4")
+
+	if _, err := buildWorker(t.TempDir()); err == nil {
+		t.Fatal("expected gitlab config error")
+	}
+}
+
+func TestRunWorkerFallsBackToGitLabChangedFiles(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobs := queue.NewMemoryQueue(1)
+	job := queue.Job{
+		DeliveryID: "d3",
+		EventType:  "comment.plan",
+		Repository: "org/repo",
+		MergeReqID: 88,
+		HeadSHA:    "abc123",
+		BaseRef:    "master",
+	}
+	if err := jobs.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	called := false
+	var got orchestrator.MergeRequestEvent
+	err := runWorker(ctx, jobs, nil, func(_ context.Context, evt orchestrator.MergeRequestEvent) error {
+		called = true
+		got = evt
+		cancel()
+		return nil
+	}, func(mrID int64) ([]string, error) {
+		if mrID != 88 {
+			t.Fatalf("unexpected merge request id: %d", mrID)
+		}
+		return []string{"clusters/cadmus/thule/deployment-worker.yaml"}, nil
+	})
+	if !called {
+		t.Fatal("expected plan function to be called")
+	}
+	if len(got.ChangedFiles) != 1 || got.ChangedFiles[0] != "clusters/cadmus/thule/deployment-worker.yaml" {
+		t.Fatalf("unexpected changed files: %+v", got.ChangedFiles)
+	}
+	if err == nil {
+		t.Fatal("expected worker to exit with context cancellation")
 	}
 }

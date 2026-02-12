@@ -25,9 +25,11 @@ func TestMainPlanCommand(t *testing.T) {
 
 	oldArgs := os.Args
 	oldStdout := os.Stdout
+	oldExit := exitFunc
 	t.Cleanup(func() {
 		os.Args = oldArgs
 		os.Stdout = oldStdout
+		exitFunc = oldExit
 	})
 
 	os.Args = []string{"thule", "plan", "--project", dir, "--sha", "abc123"}
@@ -42,6 +44,66 @@ func TestMainPlanCommand(t *testing.T) {
 	out, _ := io.ReadAll(r)
 	if !strings.Contains(string(out), "## Thule Plan") {
 		t.Fatalf("unexpected output: %s", string(out))
+	}
+}
+
+func TestMainNoArgsExits(t *testing.T) {
+	oldArgs := os.Args
+	oldExit := exitFunc
+	os.Args = []string{"thule"}
+	exitCode := 0
+	exitFunc = func(code int) { exitCode = code }
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		exitFunc = oldExit
+	})
+
+	main()
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitCode)
+	}
+}
+
+func TestMainUnknownCommandExits(t *testing.T) {
+	oldArgs := os.Args
+	oldExit := exitFunc
+	os.Args = []string{"thule", "unknown"}
+	exitCode := 0
+	exitFunc = func(code int) { exitCode = code }
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		exitFunc = oldExit
+	})
+
+	main()
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitCode)
+	}
+}
+
+func TestRunPlanLoadConfigError(t *testing.T) {
+	oldExit := exitFunc
+	oldStderr := os.Stderr
+	exitCode := 0
+	exitFunc = func(code int) { exitCode = code }
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() {
+		exitFunc = oldExit
+		os.Stderr = oldStderr
+	})
+
+	runPlan([]string{"--project", t.TempDir()})
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(string(out), "load config") {
+		t.Fatalf("expected load config error output, got %s", string(out))
 	}
 }
 

@@ -14,17 +14,21 @@ import (
 	"github.com/example/thule/internal/report"
 )
 
+var exitFunc = os.Exit
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(2)
+		exitFunc(2)
+		return
 	}
 	switch os.Args[1] {
 	case "plan":
 		runPlan(os.Args[2:])
 	default:
 		usage()
-		os.Exit(2)
+		exitFunc(2)
+		return
 	}
 }
 
@@ -38,12 +42,14 @@ func runPlan(args []string) {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 	desired, err := render.RenderProject(*project, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "render project: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 	changes, summary := diff.Compute(desired, nil, diff.Options{PruneDeletes: cfg.Diff.Prune, IgnoreFields: cfg.Diff.IgnoreFields})
 	findings := policy.NewBuiltinEvaluator().Evaluate(desired, cfg.Policy.Profile)

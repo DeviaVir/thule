@@ -10,7 +10,6 @@ import (
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/policy"
 	"github.com/example/thule/internal/queue"
-	"github.com/example/thule/internal/render"
 	"github.com/example/thule/internal/repo"
 	"github.com/example/thule/internal/run"
 	"github.com/example/thule/internal/vcs"
@@ -28,7 +27,7 @@ func main() {
 
 	log.Printf("thule-worker started repo=%s", repoRoot)
 
-	_ = runWorkerFunc(ctx, deps.jobs, deps.syncer, deps.plan)
+	_ = runWorkerFunc(ctx, deps.jobs, deps.syncer, deps.plan, deps.mrChangedFile)
 }
 
 func getEnv(key, fallback string) string {
@@ -39,15 +38,17 @@ func getEnv(key, fallback string) string {
 }
 
 type planFunc func(context.Context, orchestrator.MergeRequestEvent) error
+type mrChangedFilesFunc func(int64) ([]string, error)
 
 var runWorkerFunc = runWorker
 
 const defaultBaseRef = "master"
 
 type workerDeps struct {
-	jobs   queue.Queue
-	syncer *repo.Syncer
-	plan   planFunc
+	jobs          queue.Queue
+	syncer        *repo.Syncer
+	plan          planFunc
+	mrChangedFile mrChangedFilesFunc
 }
 
 func buildWorker(repoRoot string) (workerDeps, error) {
@@ -62,16 +63,44 @@ func buildWorker(repoRoot string) (workerDeps, error) {
 		return workerDeps{}, err
 	}
 	syncer := repo.NewSyncer(repoURL, repoRef, repoRoot, auth)
-	comments := vcs.NewMemoryCommentStore()
-	statuses := vcs.NewMemoryStatusPublisher()
+	comments := vcs.CommentStore(vcs.NewMemoryCommentStore())
+	statuses := vcs.StatusPublisher(vcs.NewMemoryStatusPublisher())
+	var mrChanges mrChangedFilesFunc
+	glOpts, enabled, err := vcs.GitLabOptionsFromEnv(repoURL)
+	if err != nil {
+		return workerDeps{}, err
+	}
+	if enabled {
+		glComments, err := vcs.NewGitLabCommentStore(glOpts)
+		if err != nil {
+			return workerDeps{}, err
+		}
+		glStatuses, err := vcs.NewGitLabStatusPublisher(glOpts)
+		if err != nil {
+			return workerDeps{}, err
+		}
+		glMRChanges, err := vcs.NewGitLabMergeRequestReader(glOpts)
+		if err != nil {
+			return workerDeps{}, err
+		}
+		comments = glComments
+		statuses = glStatuses
+		mrChanges = glMRChanges.ChangedFiles
+		log.Printf("thule-worker gitlab output enabled project=%s api=%s", glOpts.ProjectPath, glOpts.BaseURL)
+	} else {
+		log.Printf("thule-worker gitlab output disabled; using in-memory comments/status")
+	}
 	runs := run.NewMemoryStore()
-	cluster := &orchestrator.MemoryClusterReader{ByClusterNS: map[string][]render.Resource{}}
+	cluster, err := newClusterReader()
+	if err != nil {
+		return workerDeps{}, err
+	}
 
 	planner := orchestrator.NewPlanner(repoRoot, cluster, comments, statuses, runs, policy.NewBuiltinEvaluator())
-	return workerDeps{jobs: jobs, syncer: syncer, plan: planner.PlanForEvent}, nil
+	return workerDeps{jobs: jobs, syncer: syncer, plan: planner.PlanForEvent, mrChangedFile: mrChanges}, nil
 }
 
-func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc) error {
+func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc, mrChangedFiles mrChangedFilesFunc) error {
 	for {
 		job, err := jobs.Dequeue(ctx)
 		if err != nil {
@@ -86,15 +115,25 @@ func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan 
 		}
 		changedFiles := job.ChangedFiles
 		if len(changedFiles) == 0 {
-			baseRef := job.BaseRef
-			if baseRef == "" {
-				baseRef = getEnv("THULE_REPO_BASE_REF", defaultBaseRef)
+			if mrChangedFiles != nil && job.MergeReqID > 0 {
+				files, err := mrChangedFiles(job.MergeReqID)
+				if err != nil {
+					log.Printf("gitlab changed files failed delivery=%s mr=%d err=%v", job.DeliveryID, job.MergeReqID, err)
+				} else {
+					changedFiles = files
+				}
 			}
-			files, err := repo.ChangedFiles(getEnv("THULE_REPO_ROOT", "."), baseRef, job.HeadSHA)
-			if err != nil {
-				log.Printf("diff files failed delivery=%s mr=%d base=%s sha=%s err=%v", job.DeliveryID, job.MergeReqID, baseRef, job.HeadSHA, err)
-			} else {
-				changedFiles = files
+			if len(changedFiles) == 0 {
+				baseRef := job.BaseRef
+				if baseRef == "" {
+					baseRef = getEnv("THULE_REPO_BASE_REF", defaultBaseRef)
+				}
+				files, err := repo.ChangedFiles(getEnv("THULE_REPO_ROOT", "."), baseRef, job.HeadSHA)
+				if err != nil {
+					log.Printf("diff files failed delivery=%s mr=%d base=%s sha=%s err=%v", job.DeliveryID, job.MergeReqID, baseRef, job.HeadSHA, err)
+				} else {
+					changedFiles = files
+				}
 			}
 		}
 		evt := orchestrator.MergeRequestEvent{
