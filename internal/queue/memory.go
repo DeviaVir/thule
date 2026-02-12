@@ -8,6 +8,7 @@ type Job struct {
 	Repository   string
 	MergeReqID   int64
 	HeadSHA      string
+	BaseRef      string
 	ChangedFiles []string
 }
 

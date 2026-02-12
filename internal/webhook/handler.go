@@ -49,7 +49,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if event.DeliveryID == "" {
-		event.DeliveryID = firstHeader(r, "X-Gitlab-Event-UUID", "X-Request-Id", "X-Delivery-Id")
+		event.DeliveryID = firstHeader(r, "X-Gitlab-Event-UUID", "X-Gitlab-Webhook-UUID", "X-Request-Id", "X-Delivery-Id")
 	}
 
 	if err := h.orch.HandleMergeRequestEvent(r.Context(), event); err != nil {
@@ -107,7 +107,8 @@ func decodeEvent(body []byte) (orchestrator.MergeRequestEvent, error) {
 		} else if action == "merge" || state == "merged" {
 			eventType = "merge_request.merged"
 		}
-		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: eventType, Repository: repo, MergeReqID: mrID, HeadSHA: head, ChangedFiles: changed}, nil
+		base := str(attrs["target_branch"])
+		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: eventType, Repository: repo, MergeReqID: mrID, HeadSHA: head, BaseRef: base, ChangedFiles: changed}, nil
 	case "note":
 		attrs, _ := payload["object_attributes"].(map[string]any)
 		note := strings.TrimSpace(str(attrs["note"]))
@@ -126,7 +127,8 @@ func decodeEvent(body []byte) (orchestrator.MergeRequestEvent, error) {
 		if head == "" {
 			head = str(payload["head_sha"])
 		}
-		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: "comment.plan", Repository: repo, MergeReqID: mrID, HeadSHA: head, ChangedFiles: changed}, nil
+		base := str(mr["target_branch"])
+		return orchestrator.MergeRequestEvent{DeliveryID: deliveryID, EventType: "comment.plan", Repository: repo, MergeReqID: mrID, HeadSHA: head, BaseRef: base, ChangedFiles: changed}, nil
 	default:
 		return orchestrator.MergeRequestEvent{}, fmt.Errorf("unsupported event kind")
 	}

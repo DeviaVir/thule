@@ -20,7 +20,7 @@ import (
 func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	h := NewHandler("", orch)
 
 	payload := []byte(`{
@@ -65,7 +65,7 @@ func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {
 func TestWebhookSupportsGitLabMergeRequestAndCommandEvents(t *testing.T) {
 	jobs := queue.NewMemoryQueue(3)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	h := NewHandler("", orch)
 
 	mrPayload := []byte(`{
@@ -108,7 +108,7 @@ func TestWebhookSupportsGitLabMergeRequestAndCommandEvents(t *testing.T) {
 }
 
 func TestWebhookRejectsInvalidMethod(t *testing.T) {
-	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute))
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
 
@@ -119,7 +119,7 @@ func TestWebhookRejectsInvalidMethod(t *testing.T) {
 }
 
 func TestWebhookRejectsInvalidPayload(t *testing.T) {
-	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute))
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString("not-json"))
 
@@ -131,7 +131,7 @@ func TestWebhookRejectsInvalidPayload(t *testing.T) {
 
 func TestWebhookSignatureValidation(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
-	h := NewHandler("supersecret", orchestrator.New(jobs, storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
+	h := NewHandler("supersecret", orchestrator.New(jobs, storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute))
 
 	payload := []byte(`{
 		"delivery_id":"d-2",
@@ -198,7 +198,7 @@ func TestWebhookSignatureValidation(t *testing.T) {
 func TestWebhookUsesHeaderDeliveryID(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	h := NewHandler("", orch)
 
 	payload := []byte(`{
@@ -219,7 +219,7 @@ func TestWebhookUsesHeaderDeliveryID(t *testing.T) {
 func TestWebhookParsesGitLabCloseEventType(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	h := NewHandler("", orch)
 
 	payload := []byte(`{
@@ -241,7 +241,7 @@ func TestWebhookParsesGitLabCloseEventType(t *testing.T) {
 }
 
 func TestWebhookRejectsUnsupportedNoteCommand(t *testing.T) {
-	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker()))
+	h := NewHandler("", orchestrator.New(queue.NewMemoryQueue(1), storage.NewMemoryDeliveryStore(), lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute))
 	payload := []byte(`{
 		"object_kind":"note",
 		"event_id":"evt-3",

@@ -17,7 +17,7 @@ func baseEvent() MergeRequestEvent {
 func TestHandleMergeRequestEventQueuesJob(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	event := baseEvent()
 
 	if err := svc.HandleMergeRequestEvent(context.Background(), event); err != nil {
@@ -38,7 +38,7 @@ func TestHandleMergeRequestEventQueuesJob(t *testing.T) {
 func TestHandleMergeRequestEventRejectsInvalidEvents(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 
 	tests := []MergeRequestEvent{{}, {DeliveryID: "d", Repository: "org/repo", MergeReqID: 1, HeadSHA: "a"}}
 	for _, tc := range tests {
@@ -51,7 +51,7 @@ func TestHandleMergeRequestEventRejectsInvalidEvents(t *testing.T) {
 func TestHandleMergeRequestEventDeduplicatesByDeliveryID(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	event := baseEvent()
 
 	if err := svc.HandleMergeRequestEvent(context.Background(), event); err != nil {
@@ -62,10 +62,39 @@ func TestHandleMergeRequestEventDeduplicatesByDeliveryID(t *testing.T) {
 	}
 }
 
+func TestHandleMergeRequestEventDeduplicatesByKey(t *testing.T) {
+	jobs := queue.NewMemoryQueue(2)
+	store := storage.NewMemoryDeliveryStore()
+	svc := New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
+
+	event := baseEvent()
+	event.DeliveryID = "d1"
+	if err := svc.HandleMergeRequestEvent(context.Background(), event); err != nil {
+		t.Fatalf("first event failed: %v", err)
+	}
+
+	dupe := baseEvent()
+	dupe.DeliveryID = "d2"
+	if err := svc.HandleMergeRequestEvent(context.Background(), dupe); err != nil {
+		t.Fatalf("duplicate event should be ignored, got err: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := jobs.Dequeue(ctx); err != nil {
+		t.Fatalf("expected first job: %v", err)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	if _, err := jobs.Dequeue(ctx2); err == nil {
+		t.Fatal("expected no second job for deduped event")
+	}
+}
+
 func TestHandleMergeRequestEventReleasesReservationOnEnqueueFailure(t *testing.T) {
 	jobs := queue.NewMemoryQueue(1)
 	store := storage.NewMemoryDeliveryStore()
-	svc := New(jobs, store, lock.NewMemoryLocker())
+	svc := New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 
 	if err := jobs.Enqueue(context.Background(), queue.Job{DeliveryID: "prefill"}); err != nil {
 		t.Fatalf("prefill failed: %v", err)
@@ -86,7 +115,7 @@ func TestHandleMergeRequestEventProjectLockConflict(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
 	locker := lock.NewMemoryLocker()
-	svc := New(jobs, store, locker)
+	svc := New(jobs, store, locker, storage.NewMemoryDedupeStore(), time.Minute)
 
 	e1 := baseEvent()
 	e1.DeliveryID = "evt1"
@@ -107,7 +136,7 @@ func TestHandleMergeRequestEventCloseReleasesLocks(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
 	locker := lock.NewMemoryLocker()
-	svc := New(jobs, store, locker)
+	svc := New(jobs, store, locker, storage.NewMemoryDedupeStore(), time.Minute)
 
 	e1 := baseEvent()
 	e1.DeliveryID = "evt1"

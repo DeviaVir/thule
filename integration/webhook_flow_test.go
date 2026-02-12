@@ -19,7 +19,7 @@ import (
 func TestWebhookToQueueIntegration(t *testing.T) {
 	jobs := queue.NewMemoryQueue(2)
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), storage.NewMemoryDedupeStore(), time.Minute)
 	h := webhook.NewHandler("", orch)
 
 	server := httptest.NewServer(h)

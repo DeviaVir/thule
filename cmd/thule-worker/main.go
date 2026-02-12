@@ -42,6 +42,8 @@ type planFunc func(context.Context, orchestrator.MergeRequestEvent) error
 
 var runWorkerFunc = runWorker
 
+const defaultBaseRef = "master"
+
 type workerDeps struct {
 	jobs   queue.Queue
 	syncer *repo.Syncer
@@ -82,13 +84,27 @@ func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan 
 				continue
 			}
 		}
+		changedFiles := job.ChangedFiles
+		if len(changedFiles) == 0 {
+			baseRef := job.BaseRef
+			if baseRef == "" {
+				baseRef = getEnv("THULE_REPO_BASE_REF", defaultBaseRef)
+			}
+			files, err := repo.ChangedFiles(getEnv("THULE_REPO_ROOT", "."), baseRef, job.HeadSHA)
+			if err != nil {
+				log.Printf("diff files failed delivery=%s mr=%d base=%s sha=%s err=%v", job.DeliveryID, job.MergeReqID, baseRef, job.HeadSHA, err)
+			} else {
+				changedFiles = files
+			}
+		}
 		evt := orchestrator.MergeRequestEvent{
 			DeliveryID:   job.DeliveryID,
 			EventType:    job.EventType,
 			Repository:   job.Repository,
 			MergeReqID:   job.MergeReqID,
 			HeadSHA:      job.HeadSHA,
-			ChangedFiles: job.ChangedFiles,
+			BaseRef:      job.BaseRef,
+			ChangedFiles: changedFiles,
 		}
 		if err := plan(ctx, evt); err != nil {
 			log.Printf("plan failed delivery=%s mr=%d sha=%s err=%v", job.DeliveryID, job.MergeReqID, job.HeadSHA, err)

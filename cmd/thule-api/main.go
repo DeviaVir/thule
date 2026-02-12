@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/orchestrator"
@@ -30,7 +31,17 @@ func run() error {
 		return fmt.Errorf("queue init failed: %w", err)
 	}
 	store := storage.NewMemoryDeliveryStore()
-	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker())
+	dedupeCfg, err := storage.DedupeFromEnv()
+	if err != nil {
+		return fmt.Errorf("dedupe init failed: %w", err)
+	}
+	var dedupeStore storage.DedupeStore
+	var dedupeTTL time.Duration
+	if dedupeCfg != nil && dedupeCfg.Enabled {
+		dedupeStore = dedupeCfg.Store
+		dedupeTTL = dedupeCfg.TTL
+	}
+	orch := orchestrator.New(jobs, store, lock.NewMemoryLocker(), dedupeStore, dedupeTTL)
 	handler := webhook.NewHandler(secret, orch)
 
 	mux := http.NewServeMux()

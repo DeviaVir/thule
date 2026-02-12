@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/example/thule/internal/lock"
 	"github.com/example/thule/internal/project"
@@ -17,17 +18,28 @@ type MergeRequestEvent struct {
 	Repository   string   `json:"repository"`
 	MergeReqID   int64    `json:"merge_request_id"`
 	HeadSHA      string   `json:"head_sha"`
+	BaseRef      string   `json:"base_ref,omitempty"`
 	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 type Service struct {
-	jobs   queue.Queue
-	store  storage.DeliveryStore
-	locker lock.Locker
+	jobs       queue.Queue
+	store      storage.DeliveryStore
+	locker     lock.Locker
+	dedupe     storage.DedupeStore
+	dedupeTTL  time.Duration
+	dedupeKeyf func(MergeRequestEvent) string
 }
 
-func New(jobs queue.Queue, store storage.DeliveryStore, locker lock.Locker) *Service {
-	return &Service{jobs: jobs, store: store, locker: locker}
+func New(jobs queue.Queue, store storage.DeliveryStore, locker lock.Locker, dedupe storage.DedupeStore, dedupeTTL time.Duration) *Service {
+	return &Service{
+		jobs:       jobs,
+		store:      store,
+		locker:     locker,
+		dedupe:     dedupe,
+		dedupeTTL:  dedupeTTL,
+		dedupeKeyf: dedupeKey,
+	}
 }
 
 func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeRequestEvent) error {
@@ -50,10 +62,26 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 		return nil
 	}
 
+	if s.dedupe != nil && s.dedupeTTL > 0 {
+		key := s.dedupeKeyf(event)
+		ok, err := s.dedupe.Reserve(ctx, key, s.dedupeTTL)
+		if err != nil {
+			s.store.Release(event.DeliveryID)
+			return fmt.Errorf("dedupe reserve: %w", err)
+		}
+		if !ok {
+			s.store.Commit(event.DeliveryID)
+			return nil
+		}
+	}
+
 	if s.locker != nil {
 		for _, p := range project.DiscoverFromChangedFiles(event.ChangedFiles) {
 			ok, owner := s.locker.Acquire(event.Repository, p.Root, event.MergeReqID)
 			if !ok {
+				if s.dedupe != nil && s.dedupeTTL > 0 {
+					_ = s.dedupe.Release(context.Background(), s.dedupeKeyf(event))
+				}
 				s.store.Release(event.DeliveryID)
 				return fmt.Errorf("project %q is locked by MR !%d", p.Root, owner)
 			}
@@ -66,8 +94,12 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 		Repository:   event.Repository,
 		MergeReqID:   event.MergeReqID,
 		HeadSHA:      event.HeadSHA,
+		BaseRef:      event.BaseRef,
 		ChangedFiles: event.ChangedFiles,
 	}); err != nil {
+		if s.dedupe != nil && s.dedupeTTL > 0 {
+			_ = s.dedupe.Release(context.Background(), s.dedupeKeyf(event))
+		}
 		s.store.Release(event.DeliveryID)
 		return err
 	}
@@ -79,4 +111,8 @@ func (s *Service) HandleMergeRequestEvent(ctx context.Context, event MergeReques
 func isCloseEvent(eventType string) bool {
 	e := strings.ToLower(eventType)
 	return strings.Contains(e, "closed") || strings.Contains(e, "merged")
+}
+
+func dedupeKey(event MergeRequestEvent) string {
+	return fmt.Sprintf("%s:%d:%s:%s", event.Repository, event.MergeReqID, event.HeadSHA, event.EventType)
 }
