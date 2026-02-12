@@ -1,11 +1,12 @@
 module github.com/example/thule
 
 go 1.25
+// Keep major.minor format for lsif-go compatibility.
 
 require (
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/go-git/go-git/v5 v5.13.2
-	github.com/redis/go-redis/v9 v9.17.3
+	github.com/redis/go-redis/v9 v9.5.1
 	golang.org/x/crypto v0.47.0
 	golang.org/x/oauth2 v0.35.0
 	google.golang.org/api v0.266.0
@@ -87,3 +88,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace golang.org/x/crypto => golang.org/x/crypto v0.21.0
+
+replace golang.org/x/sys => golang.org/x/sys v0.30.0

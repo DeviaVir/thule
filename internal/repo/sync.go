@@ -100,10 +100,9 @@ func (s *Syncer) Maintain(_ context.Context) error {
 		return fmt.Errorf("open repo: %w", err)
 	}
 
-	// Prune remote-tracking refs so long-lived worker clones do not retain stale branches.
+	// Refresh remote-tracking refs and compact objects to bound long-lived clone growth.
 	if err := repo.Fetch(&git.FetchOptions{
 		Auth:       s.auth,
-		Prune:      true,
 		RemoteName: "origin",
 		RefSpecs: []config.RefSpec{
 			"+refs/heads/*:refs/remotes/origin/*",
