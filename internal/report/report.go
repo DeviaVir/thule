@@ -214,7 +214,7 @@ func BuildNoChangesComment(sha string, changedFiles []string, maxFiles int) stri
 	if len(changedFiles) == 0 {
 		b.WriteString("Reason: no changed files were detected for this event.\n\n")
 	} else {
-		b.WriteString("Reason: changed files did not match any configured Thule project (`thule.conf`).\n\n")
+		b.WriteString("Reason: changed files did not map to rendered Kubernetes resources in configured Thule projects.\n\n")
 	}
 	b.WriteString("### Changed files\n")
 	if len(changedFiles) == 0 {

@@ -71,6 +71,43 @@ func TestPlannerSkipsMissingConfig(t *testing.T) {
 	}
 }
 
+func TestPlannerNoRenderedResourcesStillReportsChangedFiles(t *testing.T) {
+	repo := t.TempDir()
+	projectDir := filepath.Join(repo, "apps", "payments")
+	if err := os.MkdirAll(filepath.Join(projectDir, "manifests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "version: v1\nproject: payments\nclusterRef: prod\nnamespace: payments\nrender:\n  mode: yaml\n  path: manifests\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "thule.conf"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n  namespace: payments\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "manifests", "cm.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changedFile := "apps/payments/unrelated.yaml"
+	if err := os.WriteFile(filepath.Join(projectDir, "unrelated.yaml"), []byte("foo: bar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	comments := vcs.NewMemoryCommentStore()
+	planner := NewPlanner(repo, &MemoryClusterReader{}, comments, nil, nil, nil)
+	evt := MergeRequestEvent{MergeReqID: 12, HeadSHA: "abc", ChangedFiles: []string{changedFile}}
+	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := comments.List(12)
+	if got := len(items); got != 1 {
+		t.Fatalf("expected one comment, got %d", got)
+	}
+	if !strings.Contains(items[0].Body, changedFile) {
+		t.Fatalf("expected changed file to be listed, got: %s", items[0].Body)
+	}
+	if !strings.Contains(items[0].Body, "no diffs generated") {
+		t.Fatalf("expected no-diff summary, got: %s", items[0].Body)
+	}
+}
+
 type errCluster struct{}
 
 func (e *errCluster) ListResources(_ context.Context, _, _ string) ([]render.Resource, error) {

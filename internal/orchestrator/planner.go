@@ -135,7 +135,12 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	}
 
 	if planned {
-		body := report.BuildAggregatedPlanComment(evt.HeadSHA, projectPlans, maxResourceDetails)
+		body := ""
+		if len(projectPlans) == 0 {
+			body = report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)
+		} else {
+			body = report.BuildAggregatedPlanComment(evt.HeadSHA, projectPlans, maxResourceDetails)
+		}
 		var commentID int64
 		if p.comments != nil {
 			c := p.comments.PostOrSupersede(evt.MergeReqID, body)

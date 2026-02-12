@@ -119,3 +119,36 @@ func TestSyncerCloneWithRef(t *testing.T) {
 		t.Fatalf("expected feature branch, got %s", head.Name().Short())
 	}
 }
+
+func TestSyncerMaintain(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	src := filepath.Join(t.TempDir(), "src")
+	repo, err := git.PlainInit(src, false)
+	if err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if _, err := wt.Add("README.md"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := wt.Commit("initial", &git.CommitOptions{Author: &object.Signature{Name: "test", Email: "test@example.com", When: time.Now()}}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "dest")
+	syncer := NewSyncer(src, "", dest, nil)
+	if err := syncer.Sync(ctx, ""); err != nil {
+		t.Fatalf("sync clone: %v", err)
+	}
+	if err := syncer.Maintain(ctx); err != nil {
+		t.Fatalf("maintain failed: %v", err)
+	}
+}

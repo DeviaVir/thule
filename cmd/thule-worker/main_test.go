@@ -2,13 +2,31 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/example/thule/internal/orchestrator"
 	"github.com/example/thule/internal/queue"
-	"github.com/example/thule/internal/repo"
 )
+
+type testSyncer struct {
+	enabled       bool
+	syncErr       error
+	maintainErr   error
+	syncCalls     int
+	maintainCalls int
+}
+
+func (s *testSyncer) Enabled() bool { return s.enabled }
+func (s *testSyncer) Sync(context.Context, string) error {
+	s.syncCalls++
+	return s.syncErr
+}
+func (s *testSyncer) Maintain(context.Context) error {
+	s.maintainCalls++
+	return s.maintainErr
+}
 
 func TestRunWorkerProcessesJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,7 +74,7 @@ func TestRunWorkerSyncErrorSkipsPlan(t *testing.T) {
 		t.Fatalf("enqueue failed: %v", err)
 	}
 
-	syncer := repo.NewSyncer("https://example.com/repo.git", "", "", nil)
+	syncer := &testSyncer{enabled: true, syncErr: fmt.Errorf("sync failed")}
 	called := false
 	err := runWorker(ctx, jobs, syncer, func(context.Context, orchestrator.MergeRequestEvent) error {
 		called = true
@@ -78,6 +96,21 @@ func TestGetEnvFallback(t *testing.T) {
 	t.Setenv("THULE_WORKER_TEST_ENV", "set")
 	if val := getEnv("THULE_WORKER_TEST_ENV", "fallback"); val != "set" {
 		t.Fatalf("expected env override, got %q", val)
+	}
+}
+
+func TestGetEnvInt(t *testing.T) {
+	t.Setenv("THULE_WORKER_TEST_INT", "")
+	if got := getEnvInt("THULE_WORKER_TEST_INT", 7); got != 7 {
+		t.Fatalf("expected fallback for empty value, got %d", got)
+	}
+	t.Setenv("THULE_WORKER_TEST_INT", "12")
+	if got := getEnvInt("THULE_WORKER_TEST_INT", 7); got != 12 {
+		t.Fatalf("expected parsed value, got %d", got)
+	}
+	t.Setenv("THULE_WORKER_TEST_INT", "bad")
+	if got := getEnvInt("THULE_WORKER_TEST_INT", 7); got != 7 {
+		t.Fatalf("expected fallback for invalid value, got %d", got)
 	}
 }
 
@@ -107,7 +140,7 @@ func TestMainUsesRunWorkerFunc(t *testing.T) {
 	t.Cleanup(func() { runWorkerFunc = orig })
 
 	called := false
-	runWorkerFunc = func(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc, mrChanges mrChangedFilesFunc) error {
+	runWorkerFunc = func(ctx context.Context, jobs queue.Queue, syncer repoSyncer, plan planFunc, mrChanges mrChangedFilesFunc) error {
 		called = true
 		if jobs == nil || syncer == nil || plan == nil {
 			t.Fatal("expected worker deps to be set")
@@ -192,6 +225,38 @@ func TestRunWorkerFallsBackToGitLabChangedFiles(t *testing.T) {
 	}
 	if len(got.ChangedFiles) != 1 || got.ChangedFiles[0] != "clusters/cadmus/thule/deployment-worker.yaml" {
 		t.Fatalf("unexpected changed files: %+v", got.ChangedFiles)
+	}
+	if err == nil {
+		t.Fatal("expected worker to exit with context cancellation")
+	}
+}
+
+func TestRunWorkerPeriodicRepoMaintenance(t *testing.T) {
+	t.Setenv("THULE_REPO_MAINTENANCE_EVERY", "1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobs := queue.NewMemoryQueue(1)
+	job := queue.Job{DeliveryID: "d4", EventType: "merge_request.updated", Repository: "org/repo", MergeReqID: 1, HeadSHA: "abc123"}
+	if err := jobs.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	syncer := &testSyncer{enabled: true}
+	called := false
+	err := runWorker(ctx, jobs, syncer, func(context.Context, orchestrator.MergeRequestEvent) error {
+		called = true
+		cancel()
+		return nil
+	}, nil)
+	if !called {
+		t.Fatal("expected plan function to be called")
+	}
+	if syncer.syncCalls != 1 {
+		t.Fatalf("expected one sync call, got %d", syncer.syncCalls)
+	}
+	if syncer.maintainCalls != 1 {
+		t.Fatalf("expected one maintenance call, got %d", syncer.maintainCalls)
 	}
 	if err == nil {
 		t.Fatal("expected worker to exit with context cancellation")

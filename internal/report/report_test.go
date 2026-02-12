@@ -54,7 +54,7 @@ func TestBuildNoChangesComment(t *testing.T) {
 	if !strings.Contains(body, "no diffs generated") {
 		t.Fatalf("expected no-change summary, got %s", body)
 	}
-	if !strings.Contains(body, "did not match any configured Thule project") {
+	if !strings.Contains(body, "did not map to rendered Kubernetes resources") {
 		t.Fatalf("expected reason for unmatched project config, got %s", body)
 	}
 	if !strings.Contains(body, "apps/a.yaml") {

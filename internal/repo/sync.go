@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -84,6 +85,45 @@ func (s *Syncer) Sync(ctx context.Context, sha string) error {
 		}
 	}
 
+	return nil
+}
+
+func (s *Syncer) Maintain(_ context.Context) error {
+	if !s.Enabled() {
+		return nil
+	}
+	repo, err := git.PlainOpen(s.dir)
+	if err == git.ErrRepositoryNotExists {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open repo: %w", err)
+	}
+
+	// Prune remote-tracking refs so long-lived worker clones do not retain stale branches.
+	if err := repo.Fetch(&git.FetchOptions{
+		Auth:       s.auth,
+		Prune:      true,
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			"+refs/heads/*:refs/remotes/origin/*",
+			"+refs/merge-requests/*:refs/merge-requests/*",
+		},
+	}); err != nil && err != git.NoErrAlreadyUpToDate {
+		return fmt.Errorf("prune fetch: %w", err)
+	}
+
+	// Compact packfiles and prune old loose objects to keep disk usage bounded.
+	if err := repo.RepackObjects(&git.RepackConfig{}); err != nil && err != git.ErrPackedObjectsNotSupported {
+		// Repack/prune are best-effort; keep processing jobs even if GC cannot run.
+		return nil
+	}
+	if err := repo.Prune(git.PruneOptions{
+		OnlyObjectsOlderThan: time.Now().Add(-1 * time.Hour),
+		Handler:              repo.DeleteObject,
+	}); err != nil && err != git.ErrLooseObjectsNotSupported {
+		return nil
+	}
 	return nil
 }
 

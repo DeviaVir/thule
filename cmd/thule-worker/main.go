@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/example/thule/internal/orchestrator"
@@ -39,14 +41,20 @@ func getEnv(key, fallback string) string {
 
 type planFunc func(context.Context, orchestrator.MergeRequestEvent) error
 type mrChangedFilesFunc func(int64) ([]string, error)
+type repoSyncer interface {
+	Enabled() bool
+	Sync(context.Context, string) error
+	Maintain(context.Context) error
+}
 
 var runWorkerFunc = runWorker
 
 const defaultBaseRef = "master"
+const defaultRepoMaintenanceEvery = 200
 
 type workerDeps struct {
 	jobs          queue.Queue
-	syncer        *repo.Syncer
+	syncer        repoSyncer
 	plan          planFunc
 	mrChangedFile mrChangedFilesFunc
 }
@@ -100,7 +108,10 @@ func buildWorker(repoRoot string) (workerDeps, error) {
 	return workerDeps{jobs: jobs, syncer: syncer, plan: planner.PlanForEvent, mrChangedFile: mrChanges}, nil
 }
 
-func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan planFunc, mrChangedFiles mrChangedFilesFunc) error {
+func runWorker(ctx context.Context, jobs queue.Queue, syncer repoSyncer, plan planFunc, mrChangedFiles mrChangedFilesFunc) error {
+	maintenanceEvery := getEnvInt("THULE_REPO_MAINTENANCE_EVERY", defaultRepoMaintenanceEvery)
+	jobsSinceMaintenance := 0
+
 	for {
 		job, err := jobs.Dequeue(ctx)
 		if err != nil {
@@ -111,6 +122,15 @@ func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan 
 			if err := syncer.Sync(ctx, job.HeadSHA); err != nil {
 				log.Printf("repo sync failed delivery=%s mr=%d sha=%s err=%v", job.DeliveryID, job.MergeReqID, job.HeadSHA, err)
 				continue
+			}
+			if maintenanceEvery > 0 {
+				jobsSinceMaintenance++
+				if jobsSinceMaintenance >= maintenanceEvery {
+					if err := syncer.Maintain(ctx); err != nil {
+						log.Printf("repo maintenance failed err=%v", err)
+					}
+					jobsSinceMaintenance = 0
+				}
 			}
 		}
 		changedFiles := job.ChangedFiles
@@ -151,4 +171,17 @@ func runWorker(ctx context.Context, jobs queue.Queue, syncer *repo.Syncer, plan 
 		}
 		log.Printf("plan completed delivery=%s mr=%d sha=%s", job.DeliveryID, job.MergeReqID, job.HeadSHA)
 	}
+}
+
+func getEnvInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Printf("invalid %s=%q using fallback=%d", key, raw, fallback)
+		return fallback
+	}
+	return v
 }
