@@ -16,9 +16,9 @@ ARG GO_BUILD_TAGS=live
 ENV CGO_ENABLED=0
 
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-api ./cmd/thule-api
+    go build -mod=mod -buildvcs=false -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-api ./cmd/thule-api
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-worker ./cmd/thule-worker
+    go build -mod=mod -buildvcs=false -tags "${GO_BUILD_TAGS}" -trimpath -ldflags="-s -w" -o /out/thule-worker ./cmd/thule-worker
 
 FROM gcr.io/distroless/static:nonroot
 
