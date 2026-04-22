@@ -10,10 +10,113 @@ import (
 
 func TestBuildPlanComment(t *testing.T) {
 	body := BuildPlanComment("payments", "abc", []diff.Change{{ID: "x", Action: diff.Create, ChangedKeys: []string{"spec"}, ChangedPaths: []string{"spec.replicas"}, Risks: []string{"workload-spec-change"}, DesiredYAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n    name: x\n"}}, diff.Summary{Creates: 1}, []policy.Finding{{RuleID: "r1", Severity: policy.SeverityWarn, Message: "m1", ResourceID: "id1"}}, 10)
-	for _, want := range []string{"Thule Plan", "payments", "abc", "CREATE=1", "read-only", "changed=[spec]", "paths=[spec.replicas]", "risks=[workload-spec-change]", "Policy Findings", "r1", "# desired"} {
+	for _, want := range []string{"Thule Plan", "payments", "abc", "CREATE=1", "read-only", "changed=[spec]", "paths=[spec.replicas]", "risks=[workload-spec-change]", "Policy Findings", "r1", "# desired", "<details>", "<summary>Show changes</summary>", "<summary>Show policy findings</summary>", "</details>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in body: %s", want, body)
 		}
+	}
+}
+
+func TestAppendPlanSectionsTruncatesWhenChangesDetailsStartExceedsLimit(t *testing.T) {
+	changesHeading := "### Changes"
+	headingLineLen := len(changesHeading + "\n")
+	var b strings.Builder
+	b.WriteString(strings.Repeat("x", maxCommentChars-headingLineLen-len(sizeLimitTruncationLine)))
+	appendPlanSections(&b, nil, nil, 10, changesHeading, "### Policy Findings")
+	if !strings.Contains(b.String(), "comment size limit") {
+		t.Fatalf("expected size-limit truncation, got: %s", b.String())
+	}
+	if strings.Contains(b.String(), "<details>") {
+		t.Fatalf("did not expect details block when start overflows, got: %s", b.String())
+	}
+	if len(b.String()) > maxCommentChars {
+		t.Fatalf("expected comment to respect max size, got=%d max=%d", len(b.String()), maxCommentChars)
+	}
+}
+
+func TestAppendPlanSectionsNearLimitStillClosesChangesDetails(t *testing.T) {
+	changesHeading := "### Changes"
+	findingsHeading := "### Policy Findings"
+	detailsStart := "<details>\n<summary>" + collapsedChangesSummary + "</summary>\n\n"
+	detailsEnd := "\n</details>\n"
+	filler := maxCommentChars - len(changesHeading+"\n") - len(detailsStart) - len("- none\n") - len(detailsEnd) + 1
+	if filler <= 0 {
+		t.Fatalf("unexpected filler calculation: %d", filler)
+	}
+
+	var b strings.Builder
+	b.WriteString(strings.Repeat("x", filler))
+	appendPlanSections(&b, nil, nil, 10, changesHeading, findingsHeading)
+
+	body := b.String()
+	if strings.Count(body, "<details>") != strings.Count(body, "</details>") {
+		t.Fatalf("expected balanced details tags, got: %s", body)
+	}
+	if len(body) > maxCommentChars {
+		t.Fatalf("expected comment to respect max size, got=%d max=%d", len(body), maxCommentChars)
+	}
+}
+
+func TestAppendPlanSectionsTruncatesBeforeFirstResourceLineWithoutNone(t *testing.T) {
+	changes := []diff.Change{{
+		ID:     strings.Repeat("x", maxCommentChars),
+		Action: diff.Create,
+	}}
+
+	var b strings.Builder
+	appendPlanSections(&b, changes, nil, 10, "### Changes", "### Policy Findings")
+
+	body := b.String()
+	if !strings.Contains(body, "additional resources; comment size limit") {
+		t.Fatalf("expected changes truncation marker, got: %s", body)
+	}
+	changesSection := strings.Split(body, "\n### Policy Findings\n")[0]
+	if strings.Contains(changesSection, "- none") {
+		t.Fatalf("did not expect '- none' in changes section when actionable changes were truncated, got: %s", body)
+	}
+	if strings.Count(body, "<details>") != strings.Count(body, "</details>") {
+		t.Fatalf("expected balanced details tags, got: %s", body)
+	}
+}
+
+func TestAppendPlanSectionsTruncatesWhenFindingsStartExceedsLimit(t *testing.T) {
+	changesHeading := "### Changes"
+	findingsHeading := "### Policy Findings"
+	changesStart := "<details>\n<summary>" + collapsedChangesSummary + "</summary>\n\n"
+	changesEnd := "\n</details>\n"
+	findingsStart := "<details>\n<summary>" + collapsedFindingsSummary + "</summary>\n\n"
+	fixedBeforeFindingsStart := len(changesHeading+"\n") + len(changesStart) + len("- none\n") + len(changesEnd) + len("\n"+findingsHeading+"\n")
+	filler := maxCommentChars - fixedBeforeFindingsStart - len(findingsStart) + 1
+	if filler <= 0 {
+		t.Fatalf("unexpected filler calculation: %d", filler)
+	}
+
+	var b strings.Builder
+	b.WriteString(strings.Repeat("x", filler))
+	appendPlanSections(&b, nil, nil, 10, changesHeading, findingsHeading)
+
+	body := b.String()
+	if !strings.Contains(body, "comment size limit") {
+		t.Fatalf("expected size-limit truncation, got: %s", body)
+	}
+	if strings.Contains(body, "<summary>"+collapsedFindingsSummary+"</summary>") {
+		t.Fatalf("did not expect findings details block when findings start overflows, got: %s", body)
+	}
+}
+
+func TestBuildPlanCommentFindingsEntryTruncatesOnCommentSizeLimit(t *testing.T) {
+	findings := []policy.Finding{{
+		RuleID:     "r1",
+		Severity:   policy.SeverityWarn,
+		Message:    strings.Repeat("m", maxCommentChars),
+		ResourceID: "res",
+	}}
+	body := BuildPlanComment("p", "sha", nil, diff.Summary{}, findings, 10)
+	if !strings.Contains(body, "<summary>"+collapsedFindingsSummary+"</summary>") {
+		t.Fatalf("expected collapsed findings section, got: %s", body)
+	}
+	if !strings.Contains(body, "comment size limit") {
+		t.Fatalf("expected findings truncation marker, got: %s", body)
 	}
 }
 
@@ -128,8 +231,17 @@ func TestBuildPlanCommentNoopOnlyShowsNone(t *testing.T) {
 	if !strings.Contains(body, "NO-OP=1") {
 		t.Fatalf("expected noop summary, got: %s", body)
 	}
-	if !strings.Contains(body, "### Changes\n- none") {
+	if !strings.Contains(body, "### Changes\n<details>") {
+		t.Fatalf("expected collapsed changes block, got: %s", body)
+	}
+	if !strings.Contains(body, "- none") {
 		t.Fatalf("expected no-op details suppressed, got: %s", body)
+	}
+	if !strings.Contains(body, "### Policy Findings\n<details>") {
+		t.Fatalf("expected collapsed findings block, got: %s", body)
+	}
+	if !strings.Contains(body, "<summary>Show policy findings</summary>") {
+		t.Fatalf("expected findings summary label, got: %s", body)
 	}
 }
 
@@ -156,6 +268,8 @@ func TestBuildAggregatedPlanComment(t *testing.T) {
 		"### Project: `b`",
 		"#### Changes",
 		"#### Policy Findings",
+		"<summary>Show changes</summary>",
+		"<summary>Show policy findings</summary>",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in body: %s", want, body)
