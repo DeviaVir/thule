@@ -13,6 +13,9 @@ const (
 	defaultMaxResourceDetails = 200
 	maxCommentChars           = 900000
 	maxYAMLCharsPerBlock      = 12000
+	collapsedChangesSummary   = "Show changes"
+	collapsedFindingsSummary  = "Show policy findings"
+	sizeLimitTruncationLine   = "- ... truncated (comment size limit)\n"
 )
 
 type ProjectPlan struct {
@@ -79,13 +82,13 @@ func BuildAggregatedPlanComment(sha string, projects []ProjectPlan, maxResourceD
 		}
 		header := fmt.Sprintf("### Project: `%s`\n", p.Project)
 		if b.Len()+len(header) > maxCommentChars {
-			b.WriteString("\n- ... truncated (comment size limit)\n")
+			b.WriteString("\n" + sizeLimitTruncationLine)
 			break
 		}
 		b.WriteString(header)
 		sLine := summaryLine(p.Summary) + "\n\n"
 		if b.Len()+len(sLine) > maxCommentChars {
-			b.WriteString("- ... truncated (comment size limit)\n")
+			b.WriteString(sizeLimitTruncationLine)
 			break
 		}
 		b.WriteString(sLine)
@@ -104,7 +107,31 @@ func hasActionableChanges(plan ProjectPlan) bool {
 }
 
 func appendPlanSections(b *strings.Builder, changes []diff.Change, findings []policy.Finding, maxResourceDetails int, changesHeading, findingsHeading string) {
-	b.WriteString(changesHeading + "\n")
+	changesHeadingLine := changesHeading + "\n"
+	if b.Len()+len(changesHeadingLine) > maxCommentChars {
+		if b.Len()+len(sizeLimitTruncationLine) <= maxCommentChars {
+			b.WriteString(sizeLimitTruncationLine)
+		}
+		return
+	}
+	b.WriteString(changesHeadingLine)
+	detailsStart := fmt.Sprintf("<details>\n<summary>%s</summary>\n\n", collapsedChangesSummary)
+	detailsEnd := "\n</details>\n"
+	if b.Len()+len(detailsStart)+len(detailsEnd) > maxCommentChars {
+		if b.Len()+len(sizeLimitTruncationLine) <= maxCommentChars {
+			b.WriteString(sizeLimitTruncationLine)
+		}
+		return
+	}
+	b.WriteString(detailsStart)
+	changesLimit := maxCommentChars - len(detailsEnd)
+	writeChangeContent := func(s string) bool {
+		if b.Len()+len(s) > changesLimit {
+			return false
+		}
+		b.WriteString(s)
+		return true
+	}
 	printed := 0
 	nonNoopTotal := 0
 	for _, c := range changes {
@@ -118,7 +145,9 @@ func appendPlanSections(b *strings.Builder, changes []diff.Change, findings []po
 			continue
 		}
 		if printed >= maxResourceDetails {
-			b.WriteString(fmt.Sprintf("- ... truncated (%d additional resources)\n", nonNoopTotal-printed))
+			if !writeChangeContent(fmt.Sprintf("- ... truncated (%d additional resources)\n", nonNoopTotal-printed)) {
+				sizeTruncated = true
+			}
 			break
 		}
 		line := fmt.Sprintf("- `%s` %s", c.Action, c.ID)
@@ -131,40 +160,66 @@ func appendPlanSections(b *strings.Builder, changes []diff.Change, findings []po
 		if len(c.Risks) > 0 {
 			line += fmt.Sprintf(" risks=%v", c.Risks)
 		}
-		if b.Len()+len(line)+1 > maxCommentChars {
+		if !writeChangeContent(line + "\n") {
 			sizeTruncated = true
 			break
 		}
-		b.WriteString(line + "\n")
 		if details := renderChangeDetails(c); details != "" {
-			if b.Len()+len(details) > maxCommentChars {
+			if !writeChangeContent(details) {
 				sizeTruncated = true
 				break
 			}
-			b.WriteString(details)
 		}
 		printed++
 	}
 	if sizeTruncated {
-		b.WriteString(fmt.Sprintf("- ... truncated (%d additional resources; comment size limit)\n", nonNoopTotal-printed))
+		if !writeChangeContent(fmt.Sprintf("- ... truncated (%d additional resources; comment size limit)\n", nonNoopTotal-printed)) {
+			_ = writeChangeContent("- ... truncated\n")
+		}
 	}
-	if printed == 0 {
-		b.WriteString("- none\n")
+	if nonNoopTotal == 0 {
+		_ = writeChangeContent("- none\n")
 	}
+	b.WriteString(detailsEnd)
 
-	b.WriteString("\n" + findingsHeading + "\n")
+	findingsHeadingLine := "\n" + findingsHeading + "\n"
+	if b.Len()+len(findingsHeadingLine) > maxCommentChars {
+		if b.Len()+len(sizeLimitTruncationLine) <= maxCommentChars {
+			b.WriteString(sizeLimitTruncationLine)
+		}
+		return
+	}
+	b.WriteString(findingsHeadingLine)
+	findingsStart := fmt.Sprintf("<details>\n<summary>%s</summary>\n\n", collapsedFindingsSummary)
+	findingsEnd := "\n</details>\n"
+	if b.Len()+len(findingsStart)+len(findingsEnd) > maxCommentChars {
+		if b.Len()+len(sizeLimitTruncationLine) <= maxCommentChars {
+			b.WriteString(sizeLimitTruncationLine)
+		}
+		return
+	}
+	b.WriteString(findingsStart)
+	findingsLimit := maxCommentChars - len(findingsEnd)
+	writeFindingContent := func(s string) bool {
+		if b.Len()+len(s) > findingsLimit {
+			return false
+		}
+		b.WriteString(s)
+		return true
+	}
 	if len(findings) == 0 {
-		b.WriteString("- none\n")
+		_ = writeFindingContent("- none\n")
+		b.WriteString(findingsEnd)
 		return
 	}
 	for _, f := range findings {
 		line := fmt.Sprintf("- `%s` `%s` %s (%s)\n", f.Severity, f.RuleID, f.Message, f.ResourceID)
-		if b.Len()+len(line) > maxCommentChars {
-			b.WriteString("- ... truncated (comment size limit)\n")
-			return
+		if !writeFindingContent(line) {
+			_ = writeFindingContent(sizeLimitTruncationLine)
+			break
 		}
-		b.WriteString(line)
 	}
+	b.WriteString(findingsEnd)
 }
 
 func summaryLine(summary diff.Summary) string {
