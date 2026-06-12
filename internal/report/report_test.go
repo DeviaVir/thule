@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/example/thule/internal/diff"
+	"github.com/example/thule/internal/guard"
 	"github.com/example/thule/internal/policy"
 )
 
@@ -368,6 +369,30 @@ func TestBuildNoDiffComment(t *testing.T) {
 	for _, want := range []string{"sha", "no CREATE/PATCH/DELETE changes", "Projects checked: `3`"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in body: %s", want, body)
+		}
+	}
+}
+
+func TestBuildGuardWarning(t *testing.T) {
+	if got := BuildGuardWarning(nil); got != "" {
+		t.Fatalf("expected empty banner, got %q", got)
+	}
+	violations := []guard.Violation{
+		{
+			Guard:  guard.Spec{Name: "prod-regions", Description: "regions roll independently", Prefix: "clusters/prod"},
+			App:    "db",
+			Groups: []string{"eu", "us"},
+		},
+		{
+			Guard:  guard.Spec{Name: "no-desc", Prefix: "clusters/edge"},
+			App:    "cdn",
+			Groups: []string{"a", "b"},
+		},
+	}
+	out := BuildGuardWarning(violations)
+	for _, want := range []string{"Guard violations", "prod-regions", "regions roll independently", "db", "eu, us", "no-desc"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("banner missing %q:\n%s", want, out)
 		}
 	}
 }
