@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/example/thule/pkg/thuleconfig"
+	"github.com/DeviaVir/thule/pkg/thuleconfig"
 )
 
 func TestRenderProjectYAML(t *testing.T) {

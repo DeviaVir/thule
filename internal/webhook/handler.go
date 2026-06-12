@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/example/thule/internal/orchestrator"
+	"github.com/DeviaVir/thule/internal/orchestrator"
 )
 
 type Handler struct {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 )
 
 func TestComputeWithPruneAndRisk(t *testing.T) {

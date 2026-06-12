@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/thule/internal/lock"
-	"github.com/example/thule/internal/orchestrator"
-	"github.com/example/thule/internal/queue"
-	"github.com/example/thule/internal/storage"
+	"github.com/DeviaVir/thule/internal/lock"
+	"github.com/DeviaVir/thule/internal/orchestrator"
+	"github.com/DeviaVir/thule/internal/queue"
+	"github.com/DeviaVir/thule/internal/storage"
 )
 
 func TestWebhookQueuesJobAndDeduplicatesDelivery(t *testing.T) {

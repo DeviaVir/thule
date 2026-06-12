@@ -9,12 +9,12 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/example/thule/internal/orchestrator"
-	"github.com/example/thule/internal/policy"
-	"github.com/example/thule/internal/queue"
-	"github.com/example/thule/internal/repo"
-	"github.com/example/thule/internal/run"
-	"github.com/example/thule/internal/vcs"
+	"github.com/DeviaVir/thule/internal/orchestrator"
+	"github.com/DeviaVir/thule/internal/policy"
+	"github.com/DeviaVir/thule/internal/queue"
+	"github.com/DeviaVir/thule/internal/repo"
+	"github.com/DeviaVir/thule/internal/run"
+	"github.com/DeviaVir/thule/internal/vcs"
 )
 
 func main() {

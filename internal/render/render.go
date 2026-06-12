@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/thule/pkg/thuleconfig"
+	"github.com/DeviaVir/thule/pkg/thuleconfig"
 	"gopkg.in/yaml.v3"
 )
 

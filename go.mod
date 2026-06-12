@@ -1,4 +1,4 @@
-module github.com/example/thule
+module github.com/DeviaVir/thule
 
 go 1.25
 // Keep major.minor format for lsif-go compatibility.

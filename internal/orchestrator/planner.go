@@ -8,15 +8,15 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/thule/internal/config"
-	"github.com/example/thule/internal/diff"
-	"github.com/example/thule/internal/guard"
-	"github.com/example/thule/internal/policy"
-	"github.com/example/thule/internal/project"
-	"github.com/example/thule/internal/render"
-	"github.com/example/thule/internal/report"
-	"github.com/example/thule/internal/run"
-	"github.com/example/thule/internal/vcs"
+	"github.com/DeviaVir/thule/internal/config"
+	"github.com/DeviaVir/thule/internal/diff"
+	"github.com/DeviaVir/thule/internal/guard"
+	"github.com/DeviaVir/thule/internal/policy"
+	"github.com/DeviaVir/thule/internal/project"
+	"github.com/DeviaVir/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/report"
+	"github.com/DeviaVir/thule/internal/run"
+	"github.com/DeviaVir/thule/internal/vcs"
 )
 
 type ClusterReader interface {

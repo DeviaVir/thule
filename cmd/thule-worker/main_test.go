@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/thule/internal/orchestrator"
-	"github.com/example/thule/internal/queue"
+	"github.com/DeviaVir/thule/internal/orchestrator"
+	"github.com/DeviaVir/thule/internal/queue"
 )
 
 type testSyncer struct {

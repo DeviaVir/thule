@@ -3,7 +3,7 @@ package policy
 import (
 	"testing"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 )
 
 func TestBuiltinEvaluator(t *testing.T) {

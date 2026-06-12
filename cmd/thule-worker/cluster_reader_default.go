@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/example/thule/internal/orchestrator"
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/orchestrator"
+	"github.com/DeviaVir/thule/internal/render"
 )
 
 func newClusterReader() (orchestrator.ClusterReader, error) {

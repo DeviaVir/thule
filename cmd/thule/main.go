@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/example/thule/internal/config"
-	"github.com/example/thule/internal/diff"
-	"github.com/example/thule/internal/policy"
-	"github.com/example/thule/internal/render"
-	"github.com/example/thule/internal/report"
+	"github.com/DeviaVir/thule/internal/config"
+	"github.com/DeviaVir/thule/internal/diff"
+	"github.com/DeviaVir/thule/internal/policy"
+	"github.com/DeviaVir/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/report"
 )
 
 var exitFunc = os.Exit

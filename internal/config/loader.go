@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/example/thule/pkg/thuleconfig"
+	"github.com/DeviaVir/thule/pkg/thuleconfig"
 )
 
 //go:embed thule.schema.json
