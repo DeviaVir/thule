@@ -1,91 +1,105 @@
 # Thule
 
-Thule is an Atlantis-inspired **read-only MR planner for Kubernetes GitOps repositories**.
+**Thule is a read-only merge request planner for Kubernetes GitOps repositories** — think *Atlantis, but for Flux/kustomize/Helm repos*.
 
-It watches Merge Request changes, renders desired Kubernetes resources, diffs against cluster state, and publishes a plan comment. It **never applies** resources.
+When someone opens or updates a merge request against your GitOps repo, Thule renders the Kubernetes resources that MR would produce, diffs them against what is actually running in the target cluster, and posts the result as an MR comment — before anyone merges. It **never applies anything**; Flux (or whatever reconciles your repo) remains the only write path to the cluster.
 
-## Current capabilities
+```
+GitLab MR webhook ──► thule-api ──► Redis queue ──► thule-worker
+                                                       │
+                                          clone repo, discover projects,
+                                          render manifests, diff vs live
+                                          cluster state (read-only)
+                                                       │
+                                    ◄── plan comment + commit status ───┘
+```
 
+## Why
 
-- MR webhook ingestion and deduplicated queueing.
-- Atlantis-style project locking: changed project folders are locked per MR to prevent conflicting parallel plans.
-- Changed-file project discovery with per-project `thule.conf`.
-- Rendering modes: `yaml`, `kustomize` (path-based), `helm` (rendered YAML input), `flux` (kind-aware filtering).
-- Diffing with create/patch/delete/no-op actions, ignore paths, prune control, risk tags.
-- Policy findings integrated into plan comments.
-- Run/status plumbing for reliability (run lifecycle, stale SHA checks, artifacts, status checks).
-- CI with unit/integration tests and 90% unit coverage gate.
+GitOps closes the loop *after* merge: a bad change is discovered when Flux applies it. Thule moves that discovery to review time:
+
+- **Plan comments** — a `terraform plan`-style summary (CREATE / PATCH / DELETE / no-op) per project, with rendered resource detail, posted on the MR and superseded on every push.
+- **Commit statuses** — `thule/plan` reflects plan success/failure, so you can make it a required check.
+- **Policy findings** — built-in checks (e.g. Secret changes, cluster-wide RBAC changes) surface in the plan comment.
+- **Repository guards** — MR-wide rules over the shape of the change set (e.g. "don't roll the same app in two regions in one MR"), configured per repo in `.thule.yaml`.
+- **Locking** — Atlantis-style per-project locks prevent conflicting parallel plans on the same paths.
+
+## How it works
+
+1. **`thule-api`** receives GitLab MR webhooks (secret-validated), deduplicates deliveries, and enqueues jobs to Redis.
+2. **`thule-worker`** dequeues, syncs a local clone of the repo, and discovers affected *projects*: for every changed file it walks up the directory tree looking for a `thule.conf`.
+3. For each project it renders the desired state (`yaml`, `kustomize`, `helm`, or `flux` mode), lists the corresponding live resources from the target cluster (read-only; `get`/`list`/`watch` is all the RBAC it needs), and computes a diff.
+4. The aggregated plan is posted as an MR comment (previous plans are marked superseded) and a commit status is set.
+
+Stale runs are abandoned when a newer SHA arrives; run records and artifacts are kept for debugging.
 
 ## Quick start
 
-### 1) Prerequisites
-
-- Go 1.22+
-
-### 2) Run tests
+Prerequisites: Go 1.22+, and Redis if you run api/worker (unit tests need neither).
 
 ```bash
+# run the test suite
 go test ./...
-```
 
-### 3) Local plan preview (Phase 4 local parity)
-
-```bash
+# render + diff + policy locally, printing the plan comment body
 go run ./cmd/thule plan --project ./apps/payments --sha local
 ```
 
-This reads `./apps/payments/thule.conf`, renders manifests, runs diff/policy, and prints the same style plan comment body.
-
-### 4) Run API
+Run the service pair:
 
 ```bash
+# API: receives webhooks, enqueues
 THULE_API_ADDR=:8080 THULE_WEBHOOK_SECRET=supersecret go run ./cmd/thule-api
-```
 
-### 5) Run worker
-
-```bash
+# worker: plans
 THULE_REPO_ROOT=$(pwd) go run ./cmd/thule-worker
 ```
 
-To publish real GitLab MR comments/statuses from the worker, also set:
+To post real MR comments and commit statuses, give the worker a GitLab token:
 
 ```bash
 THULE_GITLAB_TOKEN=<token> \
-THULE_GITLAB_PROJECT_PATH=infrastructure/devops/kubernetes \
-THULE_GITLAB_BASE_URL=https://gl.blockstream.io/api/v4 \
+THULE_GITLAB_PROJECT_PATH=group/your-gitops-repo \
+THULE_GITLAB_BASE_URL=https://gitlab.example.com/api/v4 \
 go run ./cmd/thule-worker
 ```
 
-## Configuration (`thule.conf`)
+See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook configuration, `/thule plan` comment command routing, and lock behavior.
+
+## Configuring a repository
+
+### Per-project: `thule.conf`
+
+Drop a `thule.conf` at the root of each *project* (any directory tree that plans as one unit — typically one per cluster or per app). Changed files map to the nearest `thule.conf` above them.
 
 ```yaml
 version: v1
-project: payments
-clusterRef: prod-eu-1
+project: payments            # name shown in the plan comment
+clusterRef: prod-eu-1        # which cluster credentials to use
 namespace: payments
 render:
-  mode: flux # yaml|kustomize|helm|flux
+  mode: flux                 # yaml | kustomize | helm | flux
   path: manifests
   flux:
     includeKinds:
       - HelmRelease
       - Kustomization
 diff:
-  prune: false
+  prune: false               # also report would-be deletions
   ignoreFields:
     - metadata.annotations
 policy:
-  profile: strict
+  profile: baseline          # baseline | strict
 comment:
-  maxResourceDetails: 100
+  maxResourceDetails: 100    # cap rendered detail per comment
 ```
 
-## Repository configuration (`.thule.yaml`)
+`clusterRef` resolves through a credential catalog — see
+[docs/cluster-access-examples.md](docs/cluster-access-examples.md) for GKE and bare-metal examples.
 
-Optional, at the repository root. Where `thule.conf` configures one project,
-`.thule.yaml` configures MR-wide behavior: guards over the shape of the
-whole change set, and a follow-up comment posted after each plan.
+### Repo-wide: `.thule.yaml`
+
+Optional, at the repository root. Where `thule.conf` configures one project, `.thule.yaml` configures MR-wide behavior: guards over the shape of the whole change set, and a follow-up comment posted after each plan.
 
 ```yaml
 guards:
@@ -106,30 +120,24 @@ followUp:
   comment: '/review --extra="Thule planned {summary} at {sha}"'
 ```
 
-Guard results surface in three places: a banner on top of the plan comment,
-a `thule/guards` commit status (failed on violation, success once the MR is
-split; absent when no guarded tree is touched), and loud failure of the
-status when `.thule.yaml` itself is invalid. Make `thule/guards` a required
-check to enforce guards rather than just surface them.
+Guard results surface in three places: a banner on top of the plan comment, a `thule/guards` commit status (failed on violation, success once the MR is split; absent when no guarded tree is touched), and loud failure of the status when `.thule.yaml` itself is invalid. Make `thule/guards` a required check to enforce guards rather than just surface them.
 
-## GitLab integration
+## Deployment
 
-See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples, `/thule plan` comment command routing, and lock behavior notes.
+Both binaries ship in one container image (see [Dockerfile](Dockerfile)). A typical production layout:
 
-## Cluster credential examples
+- `thule-api` Deployment behind an internal ingress, receiving GitLab webhooks
+- `thule-worker` Deployment with: an SSH key for cloning the GitOps repo, a GitLab API token for comments/statuses, kubeconfigs (or workload identity) for the clusters it diffs against
+- Redis as the queue between them (no persistence required; jobs are re-derivable from webhooks)
 
-See [docs/cluster-access-examples.md](docs/cluster-access-examples.md) for `thule.conf` examples that target GKE and bare-metal clusters, plus an example external cluster credential catalog keyed by `clusterRef`.
+Keep the worker's cluster credentials **read-only** — Thule plans, it never applies.
 
-## Architecture and implementation phases
+## Architecture notes
 
-- Architecture plan: [docs/thule-architecture-roadmap.md](docs/thule-architecture-roadmap.md)
-- Phase notes:
-  - [docs/phase0-implementation.md](docs/phase0-implementation.md)
-  - [docs/phase1-implementation.md](docs/phase1-implementation.md)
-  - [docs/phase2-implementation.md](docs/phase2-implementation.md)
-  - [docs/phase3-implementation.md](docs/phase3-implementation.md)
-  - [docs/phase4-implementation.md](docs/phase4-implementation.md)
+- Roadmap: [docs/thule-architecture-roadmap.md](docs/thule-architecture-roadmap.md)
+- Implementation phases: [docs/phase0-implementation.md](docs/phase0-implementation.md) … [docs/phase4-implementation.md](docs/phase4-implementation.md)
+- CI: unit + integration workflows with a 90% unit-coverage gate ([docs/ci-testing.md](docs/ci-testing.md))
 
 ## Status
 
-This repository currently provides a functional prototype across phases 0-4 architecture milestones, with in-memory adapters for queue, run store, comments, status, and cluster reading.
+Functional and in production use against GitLab. In-memory adapters exist for every external dependency (queue, run store, comments, statuses, cluster reads), so the full planning pipeline is testable without infrastructure.
