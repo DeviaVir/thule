@@ -18,3 +18,18 @@ func TestPostOrSupersede(t *testing.T) {
 	}
 	_ = c1
 }
+
+func TestMemoryCommentStorePostIsStandalone(t *testing.T) {
+	s := NewMemoryCommentStore()
+	first := s.Post(7, "/review")
+	s.PostOrSupersede(7, "plan")
+	items := s.List(7)
+	if len(items) != 2 {
+		t.Fatalf("expected two comments, got %d", len(items))
+	}
+	for _, c := range items {
+		if c.ID == first.ID && c.Superseded {
+			t.Fatal("standalone comment must not be superseded")
+		}
+	}
+}

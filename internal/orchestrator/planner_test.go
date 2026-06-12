@@ -311,3 +311,104 @@ func TestFilterDesiredByChangedFiles(t *testing.T) {
 		t.Fatalf("expected unchanged resources when changed_files is empty, got %+v", got)
 	}
 }
+
+func TestPlannerGuardsAndFollowUp(t *testing.T) {
+	repo := t.TempDir()
+	guardCfg := `guards:
+  - name: prod-regions
+    description: regions must roll independently
+    type: same-app-across-groups
+    prefix: clusters/prod
+    exempt: [flux-system]
+followUp:
+  comment: "/review {summary} @ {sha}"
+`
+	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte(guardCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, region := range []string{"eu", "us"} {
+		dir := filepath.Join(repo, "clusters", "prod", region, "db")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := fmt.Sprintf("version: v1\nproject: prod-%s\nclusterRef: %s\nnamespace: db\nrender:\n  mode: yaml\n  path: .\n", region, region)
+		if err := os.WriteFile(filepath.Join(repo, "clusters", "prod", region, "thule.conf"), []byte(cfg), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: db\n  namespace: db\n"
+		if err := os.WriteFile(filepath.Join(dir, "cm.yaml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cluster := &MemoryClusterReader{ByClusterNS: map[string][]render.Resource{"eu/db": {}, "us/db": {}}}
+	comments := vcs.NewMemoryCommentStore()
+	statuses := vcs.NewMemoryStatusPublisher()
+	planner := NewPlanner(repo, cluster, comments, statuses, run.NewMemoryStore(), nil)
+
+	evt := MergeRequestEvent{MergeReqID: 91, HeadSHA: "abc", ChangedFiles: []string{
+		"clusters/prod/eu/db/cm.yaml",
+		"clusters/prod/us/db/cm.yaml",
+	}}
+	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+
+	items := comments.List(91)
+	if len(items) != 2 {
+		t.Fatalf("expected plan + follow-up comments, got %d: %+v", len(items), items)
+	}
+	if !strings.Contains(items[0].Body, "Guard violations") || !strings.Contains(items[0].Body, "prod-regions") {
+		t.Fatalf("expected guard banner in plan comment: %s", items[0].Body)
+	}
+	if !strings.HasPrefix(items[1].Body, "/review ") || !strings.Contains(items[1].Body, "@ abc") {
+		t.Fatalf("unexpected follow-up: %s", items[1].Body)
+	}
+	if items[1].Superseded {
+		t.Fatal("follow-up must not be superseded by plan lifecycle")
+	}
+
+	var guardStatus *vcs.StatusCheck
+	for _, s := range statuses.ListStatuses(91, "abc") {
+		if s.Context == "thule/guards" {
+			sc := s
+			guardStatus = &sc
+		}
+	}
+	if guardStatus == nil || guardStatus.State != vcs.CheckFailed {
+		t.Fatalf("expected failed thule/guards status, got %+v", guardStatus)
+	}
+
+	// split MR: guard goes green, follow-up still posted
+	evt2 := MergeRequestEvent{MergeReqID: 92, HeadSHA: "def", ChangedFiles: []string{"clusters/prod/eu/db/cm.yaml"}}
+	if err := planner.PlanForEvent(context.Background(), evt2); err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+	for _, s := range statuses.ListStatuses(92, "def") {
+		if s.Context == "thule/guards" && s.State != vcs.CheckSuccess {
+			t.Fatalf("expected green guard status, got %+v", s)
+		}
+	}
+}
+
+func TestPlannerInvalidGuardConfigFailsStatus(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte("guards: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	statuses := vcs.NewMemoryStatusPublisher()
+	planner := NewPlanner(repo, &MemoryClusterReader{}, vcs.NewMemoryCommentStore(), statuses, nil, nil)
+	evt := MergeRequestEvent{MergeReqID: 93, HeadSHA: "abc", ChangedFiles: []string{"x.yaml"}}
+	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+	found := false
+	for _, s := range statuses.ListStatuses(93, "abc") {
+		if s.Context == "thule/guards" && s.State == vcs.CheckFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected failed thule/guards status for invalid config")
+	}
+}

@@ -345,3 +345,61 @@ func TestGitLabMergeRequestReaderChangedFiles(t *testing.T) {
 		t.Fatalf("unexpected paths: %+v", files)
 	}
 }
+
+func TestGitLabCommentStorePostStandalone(t *testing.T) {
+	type note struct {
+		ID     int64  `json:"id"`
+		Body   string `json:"body"`
+		System bool   `json:"system"`
+	}
+	var notes []note
+	nextID := int64(1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(notes)
+		case http.MethodPost:
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode post: %v", err)
+			}
+			n := note{ID: nextID, Body: payload["body"]}
+			nextID++
+			notes = append(notes, n)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(n)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	store, err := NewGitLabCommentStore(GitLabOptions{
+		BaseURL:     srv.URL,
+		Token:       "token",
+		ProjectPath: "group/repo",
+		Client:      srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	c := store.Post(42, "/review please")
+	if c.ID == 0 {
+		t.Fatal("expected created comment id")
+	}
+	// standalone comments carry no thule marker, so the next plan comment
+	// must not supersede them
+	if isThulePlanNote(notes[0].Body) {
+		t.Fatalf("standalone comment must not carry plan marker: %s", notes[0].Body)
+	}
+	store.PostOrSupersede(42, "plan body")
+	if isSupersededNote(notes[0].Body) {
+		t.Fatalf("standalone comment was superseded: %s", notes[0].Body)
+	}
+	if got := store.Post(0, "ignored"); got.ID != 0 {
+		t.Fatalf("expected zero comment for invalid MR id, got %+v", got)
+	}
+}
