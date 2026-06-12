@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/thule/internal/diff"
-	"github.com/example/thule/internal/guard"
-	"github.com/example/thule/internal/policy"
+	"github.com/DeviaVir/thule/internal/diff"
+	"github.com/DeviaVir/thule/internal/guard"
+	"github.com/DeviaVir/thule/internal/policy"
 )
 
 const (

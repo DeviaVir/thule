@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 )
 
 type MemoryClusterReader struct {

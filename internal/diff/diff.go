@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 	"gopkg.in/yaml.v3"
 )
 

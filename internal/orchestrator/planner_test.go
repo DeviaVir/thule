@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/thule/internal/policy"
-	"github.com/example/thule/internal/render"
-	"github.com/example/thule/internal/run"
-	"github.com/example/thule/internal/vcs"
+	"github.com/DeviaVir/thule/internal/policy"
+	"github.com/DeviaVir/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/run"
+	"github.com/DeviaVir/thule/internal/vcs"
 )
 
 func TestPlannerPlanForEvent(t *testing.T) {

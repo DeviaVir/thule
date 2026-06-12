@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	api "google.golang.org/api/container/v1"

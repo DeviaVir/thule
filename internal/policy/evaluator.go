@@ -3,7 +3,7 @@ package policy
 import (
 	"fmt"
 
-	"github.com/example/thule/internal/render"
+	"github.com/DeviaVir/thule/internal/render"
 )
 
 type Severity string
