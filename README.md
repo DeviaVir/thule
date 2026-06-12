@@ -81,6 +81,37 @@ comment:
   maxResourceDetails: 100
 ```
 
+## Repository configuration (`.thule.yaml`)
+
+Optional, at the repository root. Where `thule.conf` configures one project,
+`.thule.yaml` configures MR-wide behavior: guards over the shape of the
+whole change set, and a follow-up comment posted after each plan.
+
+```yaml
+guards:
+  # Fail when one MR modifies the same app under two or more groups of a
+  # guarded tree laid out as <prefix>/<group>/<app>/... -- a "group" is
+  # whatever failure domain the path encodes (region, site, shard).
+  - name: prod-regions
+    description: region-redundant apps must roll one region at a time
+    type: same-app-across-groups
+    prefix: clusters/prod
+    exempt:
+      - flux-system
+
+followUp:
+  # Posted as a standalone comment after each plan comment (never
+  # superseded). Useful to trigger downstream bots once the plan exists.
+  # Placeholders: {sha}, {summary}.
+  comment: '/review --extra="Thule planned {summary} at {sha}"'
+```
+
+Guard results surface in three places: a banner on top of the plan comment,
+a `thule/guards` commit status (failed on violation, success once the MR is
+split; absent when no guarded tree is touched), and loud failure of the
+status when `.thule.yaml` itself is invalid. Make `thule/guards` a required
+check to enforce guards rather than just surface them.
+
 ## GitLab integration
 
 See [docs/gitlab-setup.md](docs/gitlab-setup.md) for webhook event examples, `/thule plan` comment command routing, and lock behavior notes.

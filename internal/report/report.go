@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/example/thule/internal/diff"
+	"github.com/example/thule/internal/guard"
 	"github.com/example/thule/internal/policy"
 )
 
@@ -334,4 +335,23 @@ func truncateDiffLines(lines []string) string {
 		break
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// BuildGuardWarning renders a banner for repository guard violations;
+// callers prepend it to whatever plan comment is posted.
+func BuildGuardWarning(violations []guard.Violation) string {
+	if len(violations) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## :rotating_light: Guard violations\n\n")
+	b.WriteString("This MR violates repository guards configured in `" + guard.ConfigFilename + "`.\n\n")
+	for _, v := range violations {
+		b.WriteString(fmt.Sprintf("- %s\n", v.Message()))
+		if v.Guard.Description != "" {
+			b.WriteString(fmt.Sprintf("  - %s\n", v.Guard.Description))
+		}
+	}
+	b.WriteString("\n---\n\n")
+	return b.String()
 }

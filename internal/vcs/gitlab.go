@@ -116,6 +116,20 @@ func (s *GitLabCommentStore) PostOrSupersede(mergeReqID int64, body string) Comm
 	return Comment{ID: created.ID, MergeReqID: mergeReqID, Body: body}
 }
 
+func (s *GitLabCommentStore) Post(mergeReqID int64, body string) Comment {
+	if mergeReqID <= 0 {
+		return Comment{}
+	}
+	// no thule marker: standalone comments must not be superseded by the
+	// next plan comment
+	created, err := s.client.createNote(mergeReqID, body)
+	if err != nil {
+		log.Printf("gitlab comment post failed mr=%d err=%v", mergeReqID, err)
+		return Comment{}
+	}
+	return Comment{ID: created.ID, MergeReqID: mergeReqID, Body: body}
+}
+
 func (s *GitLabCommentStore) List(mergeReqID int64) []Comment {
 	notes, err := s.client.listNotes(mergeReqID)
 	if err != nil {

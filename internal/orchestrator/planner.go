@@ -10,6 +10,7 @@ import (
 
 	"github.com/example/thule/internal/config"
 	"github.com/example/thule/internal/diff"
+	"github.com/example/thule/internal/guard"
 	"github.com/example/thule/internal/policy"
 	"github.com/example/thule/internal/project"
 	"github.com/example/thule/internal/render"
@@ -45,6 +46,28 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	}
 	if p.status != nil {
 		p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/plan", State: vcs.CheckPending, Description: "Thule plan running"})
+	}
+
+	guardBanner := ""
+	var followUp guard.FollowUp
+	if repoCfg, err := guard.LoadConfig(p.repoRoot); err != nil {
+		// a broken .thule.yaml must fail loudly, not silently stop guarding
+		if p.status != nil {
+			p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/guards", State: vcs.CheckFailed, Description: err.Error()})
+		}
+	} else {
+		followUp = repoCfg.FollowUp
+		violations, touched := guard.Evaluate(repoCfg, evt.ChangedFiles)
+		guardBanner = report.BuildGuardWarning(violations)
+		if p.status != nil && touched {
+			state := vcs.CheckSuccess
+			desc := "No guard violations"
+			if len(violations) > 0 {
+				state = vcs.CheckFailed
+				desc = fmt.Sprintf("%d guard violation(s); see plan comment", len(violations))
+			}
+			p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/guards", State: state, Description: desc})
+		}
 	}
 
 	projects := project.DiscoverFromChangedFiles(evt.ChangedFiles)
@@ -130,7 +153,7 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	}
 
 	if !planned && p.comments != nil {
-		body := report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)
+		body := guardBanner + report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)
 		p.comments.PostOrSupersede(evt.MergeReqID, body)
 	}
 
@@ -141,10 +164,14 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 		} else {
 			body = report.BuildAggregatedPlanComment(evt.HeadSHA, projectPlans, maxResourceDetails)
 		}
+		body = guardBanner + body
 		var commentID int64
 		if p.comments != nil {
 			c := p.comments.PostOrSupersede(evt.MergeReqID, body)
 			commentID = c.ID
+			if followUp.Comment != "" && len(projectPlans) > 0 {
+				p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.Comment, evt.HeadSHA, projectPlans))
+			}
 		}
 		if p.runs != nil {
 			for _, runID := range runIDs {
@@ -206,4 +233,16 @@ func filterDesiredByChangedFiles(desired []render.Resource, changedFiles []strin
 		}
 	}
 	return filtered
+}
+
+func renderFollowUp(template, sha string, plans []report.ProjectPlan) string {
+	creates, patches, deletes := 0, 0, 0
+	for _, p := range plans {
+		creates += p.Summary.Creates
+		patches += p.Summary.Patches
+		deletes += p.Summary.Deletes
+	}
+	summary := fmt.Sprintf("%d project(s): %d create, %d patch, %d delete", len(plans), creates, patches, deletes)
+	out := strings.ReplaceAll(template, "{sha}", sha)
+	return strings.ReplaceAll(out, "{summary}", summary)
 }

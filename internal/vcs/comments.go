@@ -12,6 +12,10 @@ type Comment struct {
 
 type CommentStore interface {
 	PostOrSupersede(mergeReqID int64, body string) Comment
+	// Post adds a standalone comment that does not participate in the
+	// supersede lifecycle (used for follow-up comments such as bot
+	// triggers).
+	Post(mergeReqID int64, body string) Comment
 	List(mergeReqID int64) []Comment
 }
 
@@ -38,6 +42,15 @@ func (s *MemoryCommentStore) PostOrSupersede(mergeReqID int64, body string) Comm
 		}
 	}
 	s.comments[mergeReqID] = append(items, newComment)
+	return newComment
+}
+
+func (s *MemoryCommentStore) Post(mergeReqID int64, body string) Comment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	newComment := Comment{ID: s.nextID, MergeReqID: mergeReqID, Body: body}
+	s.nextID++
+	s.comments[mergeReqID] = append(s.comments[mergeReqID], newComment)
 	return newComment
 }
 
