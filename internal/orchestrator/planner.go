@@ -155,6 +155,9 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	if !planned && p.comments != nil {
 		body := guardBanner + report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)
 		p.comments.PostOrSupersede(evt.MergeReqID, body)
+		if followUp.CommentNoPlan != "" {
+			p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.CommentNoPlan, evt.HeadSHA, nil))
+		}
 	}
 
 	if planned {
@@ -169,8 +172,12 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 		if p.comments != nil {
 			c := p.comments.PostOrSupersede(evt.MergeReqID, body)
 			commentID = c.ID
-			if followUp.Comment != "" && len(projectPlans) > 0 {
-				p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.Comment, evt.HeadSHA, projectPlans))
+			if len(projectPlans) > 0 {
+				if followUp.Comment != "" {
+					p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.Comment, evt.HeadSHA, projectPlans))
+				}
+			} else if followUp.CommentNoPlan != "" {
+				p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.CommentNoPlan, evt.HeadSHA, nil))
 			}
 		}
 		if p.runs != nil {

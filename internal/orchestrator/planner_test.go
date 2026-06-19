@@ -391,6 +391,60 @@ followUp:
 	}
 }
 
+func TestPlannerFollowUpNoPlan(t *testing.T) {
+	repo := t.TempDir()
+	// No thule.conf anywhere, so the changed file maps to no project and the
+	// MR produces no plan -- the path that previously skipped the follow-up.
+	cfg := `followUp:
+  comment: "/review {summary} @ {sha}"
+  commentNoPlan: "/review"
+`
+	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	comments := vcs.NewMemoryCommentStore()
+	planner := NewPlanner(repo, &MemoryClusterReader{}, comments, vcs.NewMemoryStatusPublisher(), run.NewMemoryStore(), nil)
+
+	evt := MergeRequestEvent{MergeReqID: 94, HeadSHA: "abc", ChangedFiles: []string{"clusters/mon/alerting-rules/alerts.yaml"}}
+	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+
+	items := comments.List(94)
+	if len(items) != 2 {
+		t.Fatalf("expected no-changes + follow-up comments, got %d: %+v", len(items), items)
+	}
+	if items[1].Body != "/review" {
+		t.Fatalf("unexpected no-plan follow-up: %q", items[1].Body)
+	}
+	if items[1].Superseded {
+		t.Fatal("follow-up must not be superseded by plan lifecycle")
+	}
+}
+
+func TestPlannerNoFollowUpWhenCommentNoPlanUnset(t *testing.T) {
+	repo := t.TempDir()
+	// Only `comment` is set; a no-plan MR must stay silent (legacy behavior).
+	cfg := `followUp:
+  comment: "/review {summary} @ {sha}"
+`
+	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	comments := vcs.NewMemoryCommentStore()
+	planner := NewPlanner(repo, &MemoryClusterReader{}, comments, vcs.NewMemoryStatusPublisher(), run.NewMemoryStore(), nil)
+
+	evt := MergeRequestEvent{MergeReqID: 95, HeadSHA: "abc", ChangedFiles: []string{"clusters/mon/alerting-rules/alerts.yaml"}}
+	if err := planner.PlanForEvent(context.Background(), evt); err != nil {
+		t.Fatalf("plan failed: %v", err)
+	}
+	if items := comments.List(95); len(items) != 1 {
+		t.Fatalf("expected only the no-changes comment, got %d: %+v", len(items), items)
+	}
+}
+
 func TestPlannerInvalidGuardConfigFailsStatus(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte("guards: ["), 0o644); err != nil {

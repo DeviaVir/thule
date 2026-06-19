@@ -37,6 +37,13 @@ type Config struct {
 
 type FollowUp struct {
 	Comment string `yaml:"comment"`
+	// CommentNoPlan is posted instead of Comment when an MR produces no
+	// project plan: its changed files map to no Thule project, or every
+	// matched project is unchanged. Use it to still trigger a downstream
+	// review for changes Thule does not render (e.g. alerting rules) -- which
+	// Comment, gated on a non-empty plan, would otherwise skip. {sha} is
+	// substituted; {summary} resolves to "0 project(s): ...".
+	CommentNoPlan string `yaml:"commentNoPlan"`
 }
 
 type Spec struct {
