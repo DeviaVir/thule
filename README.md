@@ -118,6 +118,11 @@ followUp:
   # superseded). Useful to trigger downstream bots once the plan exists.
   # Placeholders: {sha}, {summary}.
   comment: '/review --extra="Thule planned {summary} at {sha}"'
+  # Posted instead of `comment` when the MR maps to no project plan (its
+  # changed files are not rendered by any Thule project, e.g. alerting
+  # rules). Without it such MRs get no follow-up at all. There is no plan to
+  # reference, so keep it plain. Placeholders: {sha}, {summary} (always 0).
+  commentNoPlan: '/review'
 ```
 
 Guard results surface in three places: a banner on top of the plan comment, a `thule/guards` commit status (failed on violation, success once the MR is split; absent when no guarded tree is touched), and loud failure of the status when `.thule.yaml` itself is invalid. Make `thule/guards` a required check to enforce guards rather than just surface them.
