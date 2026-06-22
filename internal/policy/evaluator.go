@@ -38,10 +38,26 @@ func (e *BuiltinEvaluator) Evaluate(resources []render.Resource, profile string)
 	for _, r := range resources {
 		if r.Kind == "Secret" {
 			findings = append(findings, Finding{ResourceID: r.ID(), RuleID: "review-secret-change", Severity: SeverityWarn, Message: "Secret change detected; validate secret rotation and source of truth"})
+			if secretHasInlineData(r) {
+				findings = append(findings, Finding{ResourceID: r.ID(), RuleID: "secret-committed-to-gitops", Severity: SeverityWarn, Message: "Secret carries inline data/stringData in Git; secrets should not be committed to GitOps — store it in the secret manager (external-secrets) instead"})
+			}
 		}
 		if profile == "strict" && r.Kind == "ClusterRoleBinding" {
 			findings = append(findings, Finding{ResourceID: r.ID(), RuleID: "restrict-cluster-admin-bindings", Severity: SeverityError, Message: fmt.Sprintf("cluster-wide RBAC binding change requires security review: %s", r.ID())})
 		}
 	}
 	return findings
+}
+
+// secretHasInlineData reports whether a rendered Secret carries its own key
+// material in Git via populated data or stringData fields. Those are the
+// Secrets we don't want committed to GitOps; a bare Secret shell (e.g. one
+// reconciled by external-secrets) has neither.
+func secretHasInlineData(r render.Resource) bool {
+	for _, key := range []string{"data", "stringData"} {
+		if m, ok := r.Body[key].(map[string]any); ok && len(m) > 0 {
+			return true
+		}
+	}
+	return false
 }
