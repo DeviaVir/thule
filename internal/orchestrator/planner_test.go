@@ -415,7 +415,7 @@ func TestPlannerFollowUpNoPlan(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected no-changes + follow-up comments, got %d: %+v", len(items), items)
 	}
-	if items[1].Body != "/review" {
+	if !strings.HasPrefix(items[1].Body, "/review") || !strings.Contains(items[1].Body, vcs.ReviewFollowUpMarker("abc")) {
 		t.Fatalf("unexpected no-plan follow-up: %q", items[1].Body)
 	}
 	if items[1].Superseded {
@@ -442,6 +442,67 @@ func TestPlannerNoFollowUpWhenCommentNoPlanUnset(t *testing.T) {
 	}
 	if items := comments.List(95); len(items) != 1 {
 		t.Fatalf("expected only the no-changes comment, got %d: %+v", len(items), items)
+	}
+}
+
+func TestPlannerFollowUpDedupPerCommit(t *testing.T) {
+	repo := t.TempDir()
+
+	// One project that produces a plan, plus a no-plan path, so we can exercise
+	// both follow-up sites. The plan path uses `comment`; later we reuse the
+	// same MR id for a no-plan run keyed on a fresh SHA.
+	guardCfg := "followUp:\n  comment: \"/review {summary} @ {sha}\"\n  commentNoPlan: \"/review\"\n"
+	if err := os.WriteFile(filepath.Join(repo, ".thule.yaml"), []byte(guardCfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(repo, "clusters", "prod", "eu", "db")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "version: v1\nproject: prod-eu\nclusterRef: eu\nnamespace: db\nrender:\n  mode: yaml\n  path: .\n"
+	if err := os.WriteFile(filepath.Join(repo, "clusters", "prod", "eu", "thule.conf"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: db\n  namespace: db\n"
+	if err := os.WriteFile(filepath.Join(dir, "cm.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cluster := &MemoryClusterReader{ByClusterNS: map[string][]render.Resource{"eu/db": {}}}
+	comments := vcs.NewMemoryCommentStore()
+	planner := NewPlanner(repo, cluster, comments, vcs.NewMemoryStatusPublisher(), run.NewMemoryStore(), nil)
+
+	changed := []string{"clusters/prod/eu/db/cm.yaml"}
+	countReviews := func(mr int64) int {
+		n := 0
+		for _, c := range comments.List(mr) {
+			if strings.HasPrefix(c.Body, "/review") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Same commit replayed three times (push + MR-update + note all re-run the
+	// planner) must yield exactly one follow-up review trigger.
+	for i := 0; i < 3; i++ {
+		if err := planner.PlanForEvent(context.Background(), MergeRequestEvent{MergeReqID: 700, HeadSHA: "sha-aaa", ChangedFiles: changed}); err != nil {
+			t.Fatalf("plan %d failed: %v", i, err)
+		}
+	}
+	if got := countReviews(700); got != 1 {
+		t.Fatalf("expected 1 follow-up review for repeated same-SHA events, got %d", got)
+	}
+	if !comments.HasComment(700, vcs.ReviewFollowUpMarker("sha-aaa")) {
+		t.Fatal("expected follow-up to carry the per-commit marker")
+	}
+
+	// A new commit is a distinct review and must post again.
+	if err := planner.PlanForEvent(context.Background(), MergeRequestEvent{MergeReqID: 700, HeadSHA: "sha-bbb", ChangedFiles: changed}); err != nil {
+		t.Fatalf("plan for new sha failed: %v", err)
+	}
+	if got := countReviews(700); got != 2 {
+		t.Fatalf("expected 2 follow-up reviews after a new commit, got %d", got)
 	}
 }
 

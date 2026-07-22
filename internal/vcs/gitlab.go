@@ -130,6 +130,25 @@ func (s *GitLabCommentStore) Post(mergeReqID int64, body string) Comment {
 	return Comment{ID: created.ID, MergeReqID: mergeReqID, Body: body}
 }
 
+func (s *GitLabCommentStore) HasComment(mergeReqID int64, marker string) bool {
+	if mergeReqID <= 0 || marker == "" {
+		return false
+	}
+	notes, err := s.client.listNotes(mergeReqID)
+	if err != nil {
+		// Fail open: on a list error, don't suppress the follow-up. A rare
+		// duplicate review is preferable to silently dropping the trigger.
+		log.Printf("gitlab comment list failed mr=%d err=%v", mergeReqID, err)
+		return false
+	}
+	for _, n := range notes {
+		if strings.Contains(n.Body, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *GitLabCommentStore) List(mergeReqID int64) []Comment {
 	notes, err := s.client.listNotes(mergeReqID)
 	if err != nil {

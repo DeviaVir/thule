@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -155,9 +156,7 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 	if !planned && p.comments != nil {
 		body := guardBanner + report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)
 		p.comments.PostOrSupersede(evt.MergeReqID, body)
-		if followUp.CommentNoPlan != "" {
-			p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.CommentNoPlan, evt.HeadSHA, nil))
-		}
+		p.postFollowUpOnce(evt.MergeReqID, evt.HeadSHA, followUp.CommentNoPlan, nil)
 	}
 
 	if planned {
@@ -173,11 +172,9 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 			c := p.comments.PostOrSupersede(evt.MergeReqID, body)
 			commentID = c.ID
 			if len(projectPlans) > 0 {
-				if followUp.Comment != "" {
-					p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.Comment, evt.HeadSHA, projectPlans))
-				}
-			} else if followUp.CommentNoPlan != "" {
-				p.comments.Post(evt.MergeReqID, renderFollowUp(followUp.CommentNoPlan, evt.HeadSHA, nil))
+				p.postFollowUpOnce(evt.MergeReqID, evt.HeadSHA, followUp.Comment, projectPlans)
+			} else {
+				p.postFollowUpOnce(evt.MergeReqID, evt.HeadSHA, followUp.CommentNoPlan, nil)
 			}
 		}
 		if p.runs != nil {
@@ -240,6 +237,29 @@ func filterDesiredByChangedFiles(desired []render.Resource, changedFiles []strin
 		}
 	}
 	return filtered
+}
+
+// postFollowUpOnce posts a follow-up trigger comment for a commit at most once.
+// Every push/MR/note event re-runs the planner, so an unguarded Post would
+// re-trigger the downstream reviewer (pr-agent) and bill a duplicate review for
+// the same SHA on every event. A hidden per-commit marker, checked against the
+// existing notes, makes it idempotent; a new commit gets a new marker and a new
+// review. Empty template (follow-up not configured) or empty SHA falls back to a
+// plain post.
+func (p *Planner) postFollowUpOnce(mergeReqID int64, sha, template string, plans []report.ProjectPlan) {
+	if template == "" || p.comments == nil {
+		return
+	}
+	body := renderFollowUp(template, sha, plans)
+	if sha != "" {
+		marker := vcs.ReviewFollowUpMarker(sha)
+		if p.comments.HasComment(mergeReqID, marker) {
+			log.Printf("thule skip duplicate follow-up review mr=%d sha=%s", mergeReqID, sha)
+			return
+		}
+		body += "\n" + marker
+	}
+	p.comments.Post(mergeReqID, body)
 }
 
 func renderFollowUp(template, sha string, plans []report.ProjectPlan) string {
