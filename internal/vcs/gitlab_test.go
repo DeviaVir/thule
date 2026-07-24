@@ -211,6 +211,63 @@ func TestGitLabCommentStoreListFiltersMarker(t *testing.T) {
 	}
 }
 
+func TestGitLabCommentStoreHasComment(t *testing.T) {
+	marker := ReviewFollowUpMarker("abc123")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/projects/group/repo/merge_requests/42/notes") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 1, "body": "plain note", "system": false},
+			{"id": 2, "body": "/review\n" + marker, "system": false},
+		})
+	}))
+	defer srv.Close()
+
+	store, err := NewGitLabCommentStore(GitLabOptions{
+		BaseURL:     srv.URL,
+		Token:       "token",
+		ProjectPath: "group/repo",
+		Client:      srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if !store.HasComment(42, marker) {
+		t.Fatal("expected marker in standalone note")
+	}
+	if store.HasComment(42, ReviewFollowUpMarker("other")) {
+		t.Fatal("unexpected marker for another commit")
+	}
+	if store.HasComment(0, marker) {
+		t.Fatal("invalid MR id must not match")
+	}
+	if store.HasComment(42, "") {
+		t.Fatal("empty marker must not match")
+	}
+}
+
+func TestGitLabCommentStoreHasCommentFailsOpen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	store, err := NewGitLabCommentStore(GitLabOptions{
+		BaseURL:     srv.URL,
+		Token:       "token",
+		ProjectPath: "group/repo",
+		Client:      srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if store.HasComment(42, ReviewFollowUpMarker("abc123")) {
+		t.Fatal("list failure must not suppress the follow-up")
+	}
+}
+
 func TestGitLabRequestHandlesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusUnauthorized)

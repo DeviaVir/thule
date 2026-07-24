@@ -33,3 +33,25 @@ func TestMemoryCommentStorePostIsStandalone(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryCommentStoreHasComment(t *testing.T) {
+	s := NewMemoryCommentStore()
+	marker := ReviewFollowUpMarker("abc123")
+	if marker != "<!--thule-review:abc123-->" {
+		t.Fatalf("unexpected review marker: %q", marker)
+	}
+	if s.HasComment(7, marker) {
+		t.Fatal("unexpected marker before comment is posted")
+	}
+
+	s.Post(7, "/review\n"+marker)
+	if !s.HasComment(7, marker) {
+		t.Fatal("expected marker in standalone comment")
+	}
+	if s.HasComment(7, ReviewFollowUpMarker("other")) {
+		t.Fatal("unexpected marker for another commit")
+	}
+	if s.HasComment(7, "") {
+		t.Fatal("empty marker must not match")
+	}
+}
