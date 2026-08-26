@@ -31,6 +31,11 @@ type Flux struct {
 type Diff struct {
 	Prune        bool     `json:"prune"`
 	IgnoreFields []string `json:"ignoreFields,omitempty"`
+	// ApplyManagers lists the field managers whose live-only fields are
+	// treated as pending removals in the diff (the next apply prunes a field
+	// this manager owns once it leaves the desired manifest). Defaults to
+	// ["kustomize-controller"].
+	ApplyManagers []string `json:"applyManagers,omitempty"`
 }
 
 type Policy struct {

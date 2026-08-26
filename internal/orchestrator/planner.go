@@ -139,6 +139,7 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 			PruneDeletes:            cfg.Diff.Prune,
 			IgnoreFields:            cfg.Diff.IgnoreFields,
 			IgnoreActualExtraFields: true,
+			ApplyManagers:           cfg.Diff.ApplyManagers,
 		})
 
 		findings := []policy.Finding{}

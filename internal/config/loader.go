@@ -82,6 +82,8 @@ func decodeSimpleYAML(in string) (thuleconfig.Config, error) {
 			switch section + "." + subsection {
 			case "diff.ignoreFields":
 				cfg.Diff.IgnoreFields = append(cfg.Diff.IgnoreFields, item)
+			case "diff.applyManagers":
+				cfg.Diff.ApplyManagers = append(cfg.Diff.ApplyManagers, item)
 			case "render.helm.valuesFiles":
 				cfg.Render.Helm.ValuesFiles = append(cfg.Render.Helm.ValuesFiles, item)
 			case "render.flux.includeKinds":

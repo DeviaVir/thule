@@ -88,6 +88,8 @@ diff:
   prune: false               # also report would-be deletions
   ignoreFields:
     - metadata.annotations
+  applyManagers:             # field managers whose live-only fields render as
+    - kustomize-controller   # pending removals instead of server noise (default)
 policy:
   profile: baseline          # baseline | strict
 comment:
