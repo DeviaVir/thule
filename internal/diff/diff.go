@@ -43,15 +43,33 @@ type Options struct {
 	// IgnoreActualExtraFields drops fields that only exist in live resources
 	// (e.g. API-server defaulted/computed attributes) before comparison.
 	IgnoreActualExtraFields bool
+	// ApplyManagers lists field managers (metadata.managedFields) whose
+	// live-only fields are kept in the comparison even when
+	// IgnoreActualExtraFields is set: a field owned by the GitOps apply
+	// manager that is absent from the desired manifest is a pending REMOVAL
+	// the next apply performs, not server-side noise. Without this, deleting
+	// e.g. an annotation from a manifest renders as a no-op.
+	// Empty means the default ["kustomize-controller"].
+	ApplyManagers []string
 }
 
+var defaultApplyManagers = []string{"kustomize-controller"}
+
 func Compute(desired, actual []render.Resource, opts Options) ([]Change, Summary) {
+	applyManagers := opts.ApplyManagers
+	if len(applyManagers) == 0 {
+		applyManagers = defaultApplyManagers
+	}
 	dm := map[string]render.Resource{}
 	am := map[string]render.Resource{}
+	ownedByID := map[string]map[string]any{}
 	for _, r := range desired {
 		dm[r.ID()] = normalize(r, opts.IgnoreFields)
 	}
 	for _, r := range actual {
+		// Extract apply-manager field ownership before normalize strips
+		// managedFields from the compared body.
+		ownedByID[r.ID()] = applyManagerFields(r.Body, applyManagers)
 		am[r.ID()] = normalize(r, opts.IgnoreFields)
 	}
 
@@ -91,7 +109,7 @@ func Compute(desired, actual []render.Resource, opts Options) ([]Change, Summary
 			desiredBody := d.Body
 			actualBody := a.Body
 			if opts.IgnoreActualExtraFields {
-				if projected, ok := projectActualToDesired(desiredBody, actualBody).(map[string]any); ok {
+				if projected, ok := projectActualToDesired(desiredBody, actualBody, ownedByID[k]).(map[string]any); ok {
 					actualBody = projected
 				}
 			}
@@ -302,20 +320,35 @@ func mustYAML(obj any) (out string) {
 	return string(b)
 }
 
-func projectActualToDesired(desired, actual any) any {
+// projectActualToDesired drops live-only fields from the comparison, EXCEPT
+// fields the apply manager owns: those are pending removals the next apply
+// performs, so hiding them would hide a real change. `owned` is the merged
+// FieldsV1 trie of the apply managers at the current path (nil disables the
+// ownership exception and restores pure projection).
+func projectActualToDesired(desired, actual, owned any) any {
 	switch dv := desired.(type) {
 	case map[string]any:
 		av, ok := actual.(map[string]any)
 		if !ok {
 			return actual
 		}
+		om, _ := owned.(map[string]any)
 		out := make(map[string]any, len(dv))
-		for k, dvv := range dv {
-			avv, exists := av[k]
+		for k, avv := range av {
+			var childOwned any
+			if om != nil {
+				childOwned = om["f:"+k]
+			}
+			dvv, exists := dv[k]
 			if !exists {
+				if childOwned != nil {
+					// Owned by the apply manager but gone from the desired
+					// manifest: surface the pending removal.
+					out[k] = avv
+				}
 				continue
 			}
-			out[k] = projectActualToDesired(dvv, avv)
+			out[k] = projectActualToDesired(dvv, avv, childOwned)
 		}
 		return out
 	case []any:
@@ -329,12 +362,75 @@ func projectActualToDesired(desired, actual any) any {
 				out = append(out, nil)
 				continue
 			}
-			out = append(out, projectActualToDesired(dv[i], av[i]))
+			// FieldsV1 list ownership uses k:/v: item keys; positional
+			// matching is not reliable, so lists keep pure projection.
+			out = append(out, projectActualToDesired(dv[i], av[i], nil))
 		}
 		return out
 	default:
 		return actual
 	}
+}
+
+// applyManagerFields merges the FieldsV1 tries of every managedFields entry
+// whose manager is in `managers`. Returns nil when nothing matches (e.g. the
+// object was never server-side applied by the GitOps manager).
+func applyManagerFields(body map[string]any, managers []string) map[string]any {
+	meta, _ := body["metadata"].(map[string]any)
+	if meta == nil {
+		return nil
+	}
+	entries, _ := meta["managedFields"].([]any)
+	var merged map[string]any
+	for _, e := range entries {
+		em, _ := e.(map[string]any)
+		if em == nil {
+			continue
+		}
+		manager, _ := em["manager"].(string)
+		if !stringInSlice(manager, managers) {
+			continue
+		}
+		if ft, _ := em["fieldsType"].(string); ft != "" && ft != "FieldsV1" {
+			continue
+		}
+		fields, _ := em["fieldsV1"].(map[string]any)
+		if fields == nil {
+			continue
+		}
+		if merged == nil {
+			merged = map[string]any{}
+		}
+		mergeFieldsTries(merged, fields)
+	}
+	return merged
+}
+
+func mergeFieldsTries(dst, src map[string]any) {
+	for k, v := range src {
+		if sv, ok := v.(map[string]any); ok {
+			if dv, ok := dst[k].(map[string]any); ok {
+				mergeFieldsTries(dv, sv)
+				continue
+			}
+			cp := map[string]any{}
+			mergeFieldsTries(cp, sv)
+			dst[k] = cp
+			continue
+		}
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
+}
+
+func stringInSlice(needle string, items []string) bool {
+	for _, i := range items {
+		if i == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func pruneNilValues(in any) any {

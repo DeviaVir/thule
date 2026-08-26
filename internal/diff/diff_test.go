@@ -258,6 +258,7 @@ func TestProjectActualToDesiredAndPruneNilValues(t *testing.T) {
 				"clusterIP": "10.0.0.1",
 			},
 		},
+		nil,
 	)
 	gotMap, ok := projected.(map[string]any)
 	if !ok {
@@ -269,11 +270,11 @@ func TestProjectActualToDesiredAndPruneNilValues(t *testing.T) {
 	}
 
 	// When desired/actual types differ, actual value is preserved.
-	if got := projectActualToDesired([]any{1}, "raw-string"); got != "raw-string" {
+	if got := projectActualToDesired([]any{1}, "raw-string", nil); got != "raw-string" {
 		t.Fatalf("expected mismatched type passthrough, got %#v", got)
 	}
 	// Missing actual array entries produce nil placeholders.
-	arr := projectActualToDesired([]any{"a", "b"}, []any{"a"}).([]any)
+	arr := projectActualToDesired([]any{"a", "b"}, []any{"a"}, nil).([]any)
 	if len(arr) != 2 || arr[1] != nil {
 		t.Fatalf("expected nil placeholder for missing entry, got %#v", arr)
 	}
@@ -291,5 +292,199 @@ func TestProjectActualToDesiredAndPruneNilValues(t *testing.T) {
 	}
 	if len(pruned["e"].([]any)) != 2 || pruned["e"].([]any)[0] != nil {
 		t.Fatalf("expected slice positions retained, got %+v", pruned["e"])
+	}
+}
+
+// Regression: with IgnoreActualExtraFields enabled, a field REMOVED from the
+// desired manifest but still present live used to project away entirely and
+// render as a no-op. When the GitOps apply manager owns the field, the next
+// apply removes it, so the plan must show a patch.
+func TestComputeSurfacesOwnedFieldRemovalAsPatch(t *testing.T) {
+	desired := []render.Resource{{APIVersion: "networking.k8s.io/v1", Kind: "Ingress", Namespace: "n", Name: "app", Body: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "Ingress",
+		"metadata": map[string]any{
+			"name": "app", "namespace": "n",
+			"annotations": map[string]any{
+				"nginx.ingress.kubernetes.io/auth-url": "http://sso.example/auth",
+			},
+		},
+		"spec": map[string]any{"ingressClassName": "nginx"},
+	}}}
+	actual := []render.Resource{{APIVersion: "networking.k8s.io/v1", Kind: "Ingress", Namespace: "n", Name: "app", Body: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "Ingress",
+		"metadata": map[string]any{
+			"name": "app", "namespace": "n",
+			"annotations": map[string]any{
+				"nginx.ingress.kubernetes.io/auth-url":              "http://sso.example/auth",
+				"nginx.ingress.kubernetes.io/auth-response-headers": "X-Auth-Request-User,X-Auth-Request-Email",
+			},
+			"managedFields": []any{
+				map[string]any{
+					"manager":    "kustomize-controller",
+					"operation":  "Apply",
+					"fieldsType": "FieldsV1",
+					"fieldsV1": map[string]any{
+						"f:metadata": map[string]any{
+							"f:annotations": map[string]any{
+								"f:nginx.ingress.kubernetes.io/auth-url":              map[string]any{},
+								"f:nginx.ingress.kubernetes.io/auth-response-headers": map[string]any{},
+							},
+						},
+						"f:spec": map[string]any{"f:ingressClassName": map[string]any{}},
+					},
+				},
+			},
+		},
+		"spec": map[string]any{"ingressClassName": "nginx"},
+	}}}
+
+	changes, summary := Compute(desired, actual, Options{PruneDeletes: true, IgnoreActualExtraFields: true})
+	if len(changes) != 1 || changes[0].Action != Patch || summary.Patches != 1 {
+		t.Fatalf("expected patch for owned-field removal, got changes=%+v summary=%+v", changes, summary)
+	}
+	foundPath := false
+	for _, path := range changes[0].ChangedPaths {
+		if strings.Contains(path, "auth-response-headers") {
+			foundPath = true
+		}
+	}
+	if !foundPath {
+		t.Fatalf("expected removed annotation in changed paths, got %+v", changes[0].ChangedPaths)
+	}
+}
+
+// Live-only fields owned by OTHER managers (server defaults, controllers)
+// stay hidden: they are not removed by the GitOps apply.
+func TestComputeStillHidesUnownedExtraFields(t *testing.T) {
+	desired := []render.Resource{{APIVersion: "apps/v1", Kind: "Deployment", Namespace: "n", Name: "app", Body: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name": "app", "namespace": "n",
+			"annotations": map[string]any{"team": "x"},
+		},
+		"spec": map[string]any{"replicas": 1},
+	}}}
+	actual := []render.Resource{{APIVersion: "apps/v1", Kind: "Deployment", Namespace: "n", Name: "app", Body: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name": "app", "namespace": "n",
+			"annotations": map[string]any{
+				"team":                              "x",
+				"deployment.kubernetes.io/revision": "42",
+			},
+			"managedFields": []any{
+				map[string]any{
+					"manager":    "kustomize-controller",
+					"operation":  "Apply",
+					"fieldsType": "FieldsV1",
+					"fieldsV1": map[string]any{
+						"f:metadata": map[string]any{
+							"f:annotations": map[string]any{"f:team": map[string]any{}},
+						},
+						"f:spec": map[string]any{"f:replicas": map[string]any{}},
+					},
+				},
+				map[string]any{
+					"manager":    "kube-controller-manager",
+					"operation":  "Update",
+					"fieldsType": "FieldsV1",
+					"fieldsV1": map[string]any{
+						"f:metadata": map[string]any{
+							"f:annotations": map[string]any{"f:deployment.kubernetes.io/revision": map[string]any{}},
+						},
+					},
+				},
+			},
+		},
+		"spec": map[string]any{"replicas": 1},
+	}}}
+
+	changes, summary := Compute(desired, actual, Options{PruneDeletes: true, IgnoreActualExtraFields: true})
+	if len(changes) != 1 || changes[0].Action != NoOp || summary.NoOps != 1 {
+		t.Fatalf("expected noop when extras are owned by other managers, got changes=%+v summary=%+v", changes, summary)
+	}
+}
+
+// A ConfigMap key removal is a pending change the plan must show.
+func TestComputeSurfacesOwnedDataKeyRemoval(t *testing.T) {
+	desired := []render.Resource{{APIVersion: "v1", Kind: "ConfigMap", Namespace: "n", Name: "cm", Body: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "cm", "namespace": "n"},
+		"data":       map[string]any{"KEEP": "1"},
+	}}}
+	actual := []render.Resource{{APIVersion: "v1", Kind: "ConfigMap", Namespace: "n", Name: "cm", Body: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]any{
+			"name": "cm", "namespace": "n",
+			"managedFields": []any{
+				map[string]any{
+					"manager":    "kustomize-controller",
+					"operation":  "Apply",
+					"fieldsType": "FieldsV1",
+					"fieldsV1": map[string]any{
+						"f:data": map[string]any{
+							"f:KEEP":   map[string]any{},
+							"f:REMOVE": map[string]any{},
+						},
+					},
+				},
+			},
+		},
+		"data": map[string]any{"KEEP": "1", "REMOVE": "old"},
+	}}}
+
+	changes, summary := Compute(desired, actual, Options{PruneDeletes: true, IgnoreActualExtraFields: true})
+	if len(changes) != 1 || changes[0].Action != Patch || summary.Patches != 1 {
+		t.Fatalf("expected patch for removed data key, got changes=%+v summary=%+v", changes, summary)
+	}
+}
+
+// Custom applyManagers replace the default list.
+func TestComputeApplyManagersOption(t *testing.T) {
+	body := func(withExtra bool) map[string]any {
+		data := map[string]any{"KEEP": "1"}
+		if withExtra {
+			data["REMOVE"] = "old"
+		}
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name": "cm", "namespace": "n",
+				"managedFields": []any{
+					map[string]any{
+						"manager":    "helm-controller",
+						"operation":  "Apply",
+						"fieldsType": "FieldsV1",
+						"fieldsV1": map[string]any{
+							"f:data": map[string]any{
+								"f:KEEP":   map[string]any{},
+								"f:REMOVE": map[string]any{},
+							},
+						},
+					},
+				},
+			},
+			"data": data,
+		}
+	}
+	desired := []render.Resource{{APIVersion: "v1", Kind: "ConfigMap", Namespace: "n", Name: "cm", Body: body(false)}}
+	actual := []render.Resource{{APIVersion: "v1", Kind: "ConfigMap", Namespace: "n", Name: "cm", Body: body(true)}}
+
+	// Default managers: helm-controller ownership is ignored -> no-op.
+	changes, _ := Compute(desired, actual, Options{IgnoreActualExtraFields: true})
+	if len(changes) != 1 || changes[0].Action != NoOp {
+		t.Fatalf("expected noop under default managers, got %+v", changes)
+	}
+	// Explicit manager: removal surfaces.
+	changes, _ = Compute(desired, actual, Options{IgnoreActualExtraFields: true, ApplyManagers: []string{"helm-controller"}})
+	if len(changes) != 1 || changes[0].Action != Patch {
+		t.Fatalf("expected patch with explicit manager, got %+v", changes)
 	}
 }

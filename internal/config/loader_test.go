@@ -7,13 +7,16 @@ import (
 )
 
 func TestDecodeAndValidateAcceptsYAML(t *testing.T) {
-	input := []byte("version: v1\nproject: payments\nclusterRef: prod-eu-1\nnamespace: payments\nrender:\n  mode: kustomize\n  path: .\ndiff:\n  prune: true\n  ignoreFields:\n    - metadata.annotations\ncomment:\n  maxResourceDetails: 25\n")
+	input := []byte("version: v1\nproject: payments\nclusterRef: prod-eu-1\nnamespace: payments\nrender:\n  mode: kustomize\n  path: .\ndiff:\n  prune: true\n  ignoreFields:\n    - metadata.annotations\n  applyManagers:\n    - kustomize-controller\n    - helm-controller\ncomment:\n  maxResourceDetails: 25\n")
 	cfg, err := Decode(input)
 	if err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 	if !cfg.Diff.Prune || len(cfg.Diff.IgnoreFields) != 1 || cfg.Comment.MaxResourceDetails != 25 {
 		t.Fatalf("expected parsed phase2 fields: %+v", cfg)
+	}
+	if len(cfg.Diff.ApplyManagers) != 2 || cfg.Diff.ApplyManagers[1] != "helm-controller" {
+		t.Fatalf("expected parsed applyManagers: %+v", cfg.Diff.ApplyManagers)
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("expected valid config, got error: %v", err)
