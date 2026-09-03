@@ -10,8 +10,7 @@ If you are an agent working anywhere under this repo, read this file first and f
 
 ## Update rule
 
-- Append newly learned repo-specific skills/context after completing relevant work.
-- Do not add generic guidance that is not Thule-specific.
+- Add or revise one entry when work reveals a Thule-specific lesson; keep generic guidance out. Git history is the changelog.
 
 ## Entry template
 
@@ -34,10 +33,3 @@ If you are an agent working anywhere under this repo, read this file first and f
   **How**: Reproduce with `go test ./internal/... ./pkg/... -covermode=atomic -coverprofile=unit.out` then `./scripts/check_coverage.sh 90 unit.out`; keep tests for `appendPlanSections` overflow paths (changes details start/end, findings start, oversized findings lines).
   **Gotchas**: CI runs in Go 1.25; if using `golang:1.25` container, ensure `/usr/local/go/bin` is on `PATH` when invoking `go` from `sh`.
   **Owner/Docs**: DevOps / Thule
-
-## Change log
-
-- 2026-04-22: Added initial repo-local AGENTS guide and documented collapsed default for change sections in plan comments.
-- 2026-04-22: Updated Thule comment behavior note to include collapsed default for policy findings sections.
-- 2026-04-22: Added coverage runbook note for 90% gate and report comment size-limit branch tests.
-- 2026-04-22: Updated report truncation note to reserve closing details tags and avoid contradictory `- none` output when actionable changes are truncated.
