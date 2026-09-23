@@ -22,6 +22,12 @@ If you are an agent working anywhere under this repo, read this file first and f
 
 ## Skills & context
 
+- **What**: Keyed list projection hides injected items while preserving apply-owned removals and real reorders.
+  **Where**: `internal/diff/diff.go`, `internal/diff/diff_test.go`
+  **How**: With `IgnoreActualExtraFields`, pair list-of-map items by the first unique scalar key from `name`, `mountPath`, `containerPort`, `port`, `devicePath`, trying fields used by the apply manager's FieldsV1 `k:` entries first; project matched live items in live order with their `k:` ownership subtrees and keep owned live-only items verbatim.
+  **Gotchas**: SSA records list-key fields as owned even when defaulted (`ports[].protocol`), so strip them from the item's ownership subtree or they render as removals. Unowned extras (Reloader `STAKATER_*` env) disappear; lists without a qualifying key keep positional projection.
+  **Owner/Docs**: DevOps / Thule
+
 - **What**: Thule plan comments collapse change details and policy findings by default to keep large PR comments/notes readable.
   **Where**: `internal/report/report.go`, `internal/report/report_test.go`
   **How**: Wrap `Changes` and `Policy Findings` section contents in markdown `<details><summary>...</summary> ... </details>` while keeping summary lines visible.

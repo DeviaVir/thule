@@ -1,11 +1,363 @@
 package diff
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/DeviaVir/thule/internal/render"
 )
+
+func keyedListDeployment(env []any, image string, managedFields ...any) render.Resource {
+	return render.Resource{APIVersion: "apps/v1", Kind: "Deployment", Namespace: "n", Name: "litellm", Body: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "litellm", "namespace": "n", "managedFields": managedFields},
+		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+			"containers": []any{
+				map[string]any{"name": "litellm", "image": "litellm:v1", "env": env},
+				map[string]any{"name": "sidecar", "image": image},
+			},
+		}}},
+	}}
+}
+
+func keyedEnvOwnership(manager, operation string, envFields map[string]any) map[string]any {
+	return map[string]any{
+		"manager": manager, "operation": operation, "fieldsType": "FieldsV1",
+		"fieldsV1": map[string]any{"f:spec": map[string]any{"f:template": map[string]any{"f:spec": map[string]any{
+			"f:containers": map[string]any{`k:{"name":"litellm"}`: map[string]any{"f:env": envFields}},
+		}}}},
+	}
+}
+
+func TestComputeIgnoresReloaderEnvEntries(t *testing.T) {
+	env := []any{
+		map[string]any{"name": "DATABASE_URL", "value": "database-placeholder"},
+		map[string]any{"name": "DIRECT_URL", "value": "direct-placeholder"},
+	}
+	liveEnv := append([]any{
+		map[string]any{"name": "STAKATER_A", "value": "a"},
+		map[string]any{"name": "STAKATER_B", "value": "b"},
+		map[string]any{"name": "STAKATER_C", "value": "c"},
+	}, env...)
+	actual := keyedListDeployment(liveEnv, "sidecar:v1",
+		keyedEnvOwnership("kustomize-controller", "Apply", map[string]any{
+			".":                         map[string]any{},
+			`k:{"name":"DATABASE_URL"}`: map[string]any{"f:value": map[string]any{}},
+			`k:{"name":"DIRECT_URL"}`:   map[string]any{"f:value": map[string]any{}},
+		}),
+		keyedEnvOwnership("Reloader", "Update", map[string]any{
+			`k:{"name":"STAKATER_A"}`: map[string]any{},
+			`k:{"name":"STAKATER_B"}`: map[string]any{},
+			`k:{"name":"STAKATER_C"}`: map[string]any{},
+		}),
+	)
+	for _, tc := range []struct {
+		name   string
+		image  string
+		action Action
+		lines  []string
+	}{
+		{name: "identical desired entries", image: "sidecar:v1", action: NoOp},
+		{name: "only sidecar image changes", image: "sidecar:v2", action: Patch, lines: []string{
+			`- spec.template.spec.containers[1].image: "sidecar:v1"`,
+			`+ spec.template.spec.containers[1].image: "sidecar:v2"`,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired := keyedListDeployment(env, tc.image)
+			changes, summary := Compute([]render.Resource{desired}, []render.Resource{actual}, Options{IgnoreActualExtraFields: true})
+			if len(changes) != 1 || changes[0].Action != tc.action {
+				t.Fatalf("unexpected changes=%+v summary=%+v", changes, summary)
+			}
+			if !reflect.DeepEqual(changes[0].AttributeDiff, tc.lines) {
+				t.Fatalf("expected only %q, got %q", tc.lines, changes[0].AttributeDiff)
+			}
+		})
+	}
+}
+
+func TestComputeKeyedEnvChanges(t *testing.T) {
+	keep := map[string]any{"name": "KEEP", "value": "keep"}
+	x := map[string]any{"name": "X", "value": "old", "extra": "preserved"}
+	for _, tc := range []struct {
+		name    string
+		desired []any
+		actual  []any
+		owned   map[string]any
+		action  Action
+		lines   []string
+	}{
+		{
+			name: "owned item removal", desired: []any{keep}, actual: []any{keep, x},
+			owned: map[string]any{`k:{"name":"X"}`: map[string]any{}}, action: Patch,
+			lines: []string{
+				`- spec.template.spec.containers[0].env: [{"name":"KEEP","value":"keep"},{"extra":"preserved","name":"X","value":"old"}]`,
+				`+ spec.template.spec.containers[0].env: [{"name":"KEEP","value":"keep"}]`,
+			},
+		},
+		{
+			name:    "owned field removal inside matched item",
+			desired: []any{map[string]any{"name": "X"}}, actual: []any{keep, x},
+			owned: map[string]any{`k:{"name":"X"}`: map[string]any{"f:value": map[string]any{}}}, action: Patch,
+			lines: []string{`- spec.template.spec.containers[0].env[0].value: "old"`},
+		},
+		{
+			name: "unowned live-only item", desired: []any{keep}, actual: []any{x, keep}, action: NoOp,
+		},
+		{
+			name: "desired item missing from live", desired: []any{keep, x}, actual: []any{keep}, action: Patch,
+			lines: []string{
+				`- spec.template.spec.containers[0].env: [{"name":"KEEP","value":"keep"}]`,
+				`+ spec.template.spec.containers[0].env: [{"name":"KEEP","value":"keep"},{"extra":"preserved","name":"X","value":"old"}]`,
+			},
+		},
+		{
+			name: "matched items reordered", desired: []any{keep, x}, actual: []any{x, keep}, action: Patch,
+			lines: []string{
+				`- spec.template.spec.containers[0].env[0].name: "X"`,
+				`+ spec.template.spec.containers[0].env[0].name: "KEEP"`,
+				`- spec.template.spec.containers[0].env[0].value: "old"`,
+				`+ spec.template.spec.containers[0].env[0].value: "keep"`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired := keyedListDeployment(tc.desired, "sidecar:v1")
+			actual := keyedListDeployment(tc.actual, "sidecar:v1", keyedEnvOwnership("kustomize-controller", "Apply", tc.owned))
+			changes, summary := Compute([]render.Resource{desired}, []render.Resource{actual}, Options{IgnoreActualExtraFields: true})
+			if len(changes) != 1 || changes[0].Action != tc.action {
+				t.Fatalf("unexpected changes=%+v summary=%+v", changes, summary)
+			}
+			got := strings.Join(changes[0].AttributeDiff, "\n")
+			for _, line := range tc.lines {
+				if !strings.Contains(got, line) {
+					t.Fatalf("expected %q in %q", line, got)
+				}
+			}
+		})
+	}
+}
+
+func TestProjectKeyedVolumeMountsAndPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		desired []any
+		actual  []any
+		owned   map[string]any
+		want    []any
+	}{
+		{
+			name: "duplicate volume names use mountPath",
+			desired: []any{
+				map[string]any{"name": "data", "mountPath": "/a"},
+				map[string]any{"name": "data", "mountPath": "/b"},
+			},
+			actual: []any{
+				map[string]any{"name": "injected", "mountPath": "/injected"},
+				map[string]any{"name": "data", "mountPath": "/a", "readOnly": false},
+				map[string]any{"name": "data", "mountPath": "/b", "subPath": "removed"},
+			},
+			owned: map[string]any{`k:{"mountPath":"/b"}`: map[string]any{"f:subPath": map[string]any{}}},
+			want: []any{
+				map[string]any{"name": "data", "mountPath": "/a"},
+				map[string]any{"name": "data", "mountPath": "/b", "subPath": "removed"},
+			},
+		},
+		{
+			name:    "containerPort with multi-field ownership keys",
+			desired: []any{map[string]any{"containerPort": float64(80)}},
+			actual: []any{
+				map[string]any{"containerPort": float64(90)},
+				map[string]any{"containerPort": float64(80), "protocol": "TCP", "hostPort": float64(8080)},
+				map[string]any{"containerPort": float64(81), "protocol": "TCP"},
+			},
+			owned: map[string]any{
+				".": map[string]any{},
+				`k:{"containerPort":80,"protocol":"TCP"}`:   map[string]any{"f:hostPort": map[string]any{}},
+				`k:{"containerPort":"81","protocol":"TCP"}`: map[string]any{},
+			},
+			want: []any{
+				map[string]any{"containerPort": float64(80), "hostPort": float64(8080)},
+				map[string]any{"containerPort": float64(81), "protocol": "TCP"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := projectActualToDesired(tc.desired, tc.actual, tc.owned)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("expected %#v, got %#v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestProjectListKeyCandidates(t *testing.T) {
+	keys := []string{"name", "mountPath", "containerPort", "port", "devicePath"}
+	for i, key := range keys {
+		t.Run(key, func(t *testing.T) {
+			desiredItem := map[string]any{key: "match"}
+			actualItem := map[string]any{key: "match"}
+			injectedItem := map[string]any{key: "injected"}
+			// Later candidates would not match: the first qualifying key wins.
+			for _, later := range keys[i+1:] {
+				desiredItem[later] = "desired"
+				actualItem[later] = "live"
+				injectedItem[later] = "injected"
+			}
+			got := projectActualToDesired([]any{desiredItem}, []any{injectedItem, actualItem}, nil)
+			if !reflect.DeepEqual(got, []any{actualItem}) {
+				t.Fatalf("expected item matched by %s, got %#v", key, got)
+			}
+		})
+	}
+}
+
+func TestProjectListKeyFieldsAreNotPendingRemovals(t *testing.T) {
+	// SSA owns defaulted key fields (protocol) of a multi-field list key; the
+	// manifest omits them, which must not render as a removal.
+	desired := []any{map[string]any{"name": "http", "containerPort": float64(4000)}}
+	actual := []any{map[string]any{"name": "http", "containerPort": float64(4000), "protocol": "TCP"}}
+	owned := map[string]any{
+		`k:{"containerPort":4000,"protocol":"TCP"}`: map[string]any{
+			".": map[string]any{}, "f:containerPort": map[string]any{}, "f:name": map[string]any{}, "f:protocol": map[string]any{},
+		},
+	}
+	got := projectActualToDesired(desired, actual, owned)
+	if !reflect.DeepEqual(got, desired) {
+		t.Fatalf("expected defaulted key field hidden, got %#v", got)
+	}
+}
+
+func TestProjectListKeyPrefersOwnershipKey(t *testing.T) {
+	// Every mount has a unique name, but FieldsV1 owns volumeMounts by
+	// mountPath: pairing must use mountPath so the owned removal surfaces.
+	desired := []any{map[string]any{"name": "data", "mountPath": "/data"}}
+	actual := []any{
+		map[string]any{"name": "data", "mountPath": "/data"},
+		map[string]any{"name": "cache", "mountPath": "/cache"},
+		map[string]any{"name": "injected", "mountPath": "/injected"},
+	}
+	owned := map[string]any{
+		`k:{"mountPath":"/data"}`:  map[string]any{".": map[string]any{}},
+		`k:{"mountPath":"/cache"}`: map[string]any{".": map[string]any{}},
+	}
+	got := projectActualToDesired(desired, actual, owned)
+	want := []any{actual[0], actual[1]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected owned /cache removal kept and /injected dropped, got %#v", got)
+	}
+	if keys := listKeyCandidates(owned); keys[0] != "mountPath" {
+		t.Fatalf("expected mountPath first, got %v", keys)
+	}
+	if keys := listKeyCandidates(map[string]any{"k:{bad": map[string]any{}, "f:x": map[string]any{}}); !reflect.DeepEqual(keys, defaultListKeys) {
+		t.Fatalf("expected default order, got %v", keys)
+	}
+}
+
+func TestProjectListsWithoutQualifyingKeyStayPositional(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		desired []any
+		actual  []any
+		want    []any
+	}{
+		{
+			name:    "duplicate desired keys",
+			desired: []any{map[string]any{"name": "a"}, map[string]any{"name": "a"}},
+			actual:  []any{map[string]any{"name": "b", "extra": "drop"}, map[string]any{"name": "a"}},
+			want:    []any{map[string]any{"name": "b"}, map[string]any{"name": "a"}},
+		},
+		{
+			name: "duplicate live keys", desired: []any{map[string]any{"name": "a"}},
+			actual: []any{map[string]any{"name": "b", "extra": "drop"}, map[string]any{"name": "b"}},
+			want:   []any{map[string]any{"name": "b"}},
+		},
+		{
+			name: "non-map live item", desired: []any{map[string]any{"name": "a"}},
+			actual: []any{"raw", map[string]any{"name": "a"}}, want: []any{"raw"},
+		},
+		{
+			name: "non-map desired item", desired: []any{"desired", "missing"},
+			actual: []any{"actual"}, want: []any{"actual", nil},
+		},
+		{
+			name: "missing live key", desired: []any{map[string]any{"name": "a"}},
+			actual: []any{map[string]any{"extra": "drop"}, map[string]any{"name": "a"}},
+			want:   []any{map[string]any{}},
+		},
+		{
+			name: "missing desired key", desired: []any{map[string]any{"value": "desired"}},
+			actual: []any{map[string]any{"name": "a", "value": "actual"}},
+			want:   []any{map[string]any{"value": "actual"}},
+		},
+		{
+			name: "boolean key", desired: []any{map[string]any{"name": true}},
+			actual: []any{map[string]any{"name": false}, map[string]any{"name": true}},
+			want:   []any{map[string]any{"name": false}},
+		},
+		{
+			name: "non-scalar key", desired: []any{map[string]any{"name": []any{"a"}}},
+			actual: []any{map[string]any{"name": []any{"b"}}}, want: []any{map[string]any{"name": []any{"b"}}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Even an owned extra field stays projected away in positional fallback.
+			owned := map[string]any{`k:{"name":"b"}`: map[string]any{"f:extra": map[string]any{}}}
+			got := projectActualToDesired(tc.desired, tc.actual, owned)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("expected positional projection %#v, got %#v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestProjectKeyedListEmptySidesAndOwnership(t *testing.T) {
+	item := map[string]any{"name": "X", "value": "old"}
+	owned := map[string]any{`k:{"name":"X"}`: map[string]any{}}
+	for _, tc := range []struct {
+		name    string
+		desired []any
+		actual  []any
+		owned   any
+		want    []any
+	}{
+		{name: "empty live", desired: []any{item}, actual: []any{}, want: []any{}},
+		{name: "empty desired unowned", desired: []any{}, actual: []any{item}, want: []any{}},
+		{name: "empty desired owned", desired: []any{}, actual: []any{item}, owned: owned, want: []any{item}},
+		{name: "both empty", desired: []any{}, actual: []any{}, want: []any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := projectActualToDesired(tc.desired, tc.actual, tc.owned)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("expected %#v, got %#v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestListOwnershipByKey(t *testing.T) {
+	owned := map[string]any{
+		".":                        map[string]any{},
+		"k:invalid":                map[string]any{},
+		`k:["not an object"]`:      map[string]any{},
+		`k:{"protocol":"TCP"}`:     map[string]any{},
+		`k:{"containerPort":true}`: map[string]any{},
+		`k:{"containerPort":90}`:   "invalid subtree",
+		`k:{"containerPort":80,"protocol":"TCP"}`: map[string]any{"f:hostPort": map[string]any{}},
+		`k:{"containerPort":80,"protocol":"UDP"}`: map[string]any{"f:name": map[string]any{}, "f:protocol": map[string]any{}},
+	}
+	// Subtrees merge per selected value; key fields (protocol) are dropped.
+	want := map[string]any{"80": map[string]any{"f:hostPort": map[string]any{}, "f:name": map[string]any{}}}
+	before := deepCopyMap(owned)
+	if got := listOwnershipByKey(owned, "containerPort"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected merged ownership %#v, got %#v", want, got)
+	}
+	if !reflect.DeepEqual(owned, before) {
+		t.Fatal("ownership indexing modified the original trie")
+	}
+}
 
 func TestComputeWithPruneAndRisk(t *testing.T) {
 	desired := []render.Resource{{APIVersion: "apps/v1", Kind: "Deployment", Namespace: "n", Name: "a", Body: map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]any{"namespace": "n", "name": "a"}, "spec": map[string]any{"replicas": 2}}}, {APIVersion: "v1", Kind: "ConfigMap", Namespace: "n", Name: "c", Body: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"namespace": "n", "name": "c"}}}}
