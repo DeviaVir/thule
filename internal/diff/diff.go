@@ -356,20 +356,142 @@ func projectActualToDesired(desired, actual, owned any) any {
 		if !ok {
 			return actual
 		}
+		for _, key := range listKeyCandidates(owned) {
+			desiredByKey, dok := indexListItems(dv, key)
+			_, aok := indexListItems(av, key)
+			if !dok || !aok {
+				continue
+			}
+			ownedByKey := listOwnershipByKey(owned, key)
+			out := make([]any, 0, len(av))
+			for _, item := range av {
+				value, _ := listKeyValue(item.(map[string]any)[key])
+				childOwned := ownedByKey[value]
+				if desiredItem, exists := desiredByKey[value]; exists {
+					out = append(out, projectActualToDesired(desiredItem, item, childOwned))
+				} else if childOwned != nil {
+					// Keep owned live-only items verbatim to surface removals.
+					out = append(out, item)
+				}
+			}
+			return out
+		}
 		out := make([]any, 0, len(dv))
 		for i := range dv {
 			if i >= len(av) {
 				out = append(out, nil)
 				continue
 			}
-			// FieldsV1 list ownership uses k:/v: item keys; positional
-			// matching is not reliable, so lists keep pure projection.
+			// Without a unique associative key, keep positional projection;
+			// FieldsV1 item ownership cannot reliably match these positions.
 			out = append(out, projectActualToDesired(dv[i], av[i], nil))
 		}
 		return out
 	default:
 		return actual
 	}
+}
+
+var defaultListKeys = []string{"name", "mountPath", "containerPort", "port", "devicePath"}
+
+// listKeyCandidates orders the associative keys to try, preferring fields the
+// apply manager's FieldsV1 k: entries use (e.g. volumeMounts are owned by
+// mountPath even when every mount also has a unique name), so ownership
+// lookups match the key the items are paired by.
+func listKeyCandidates(owned any) []string {
+	om, _ := owned.(map[string]any)
+	used := map[string]bool{}
+	for field := range om {
+		if !strings.HasPrefix(field, "k:") {
+			continue
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(field, "k:")), &fields); err != nil {
+			continue
+		}
+		for k := range fields {
+			used[k] = true
+		}
+	}
+	out := make([]string, 0, len(defaultListKeys))
+	for _, k := range defaultListKeys {
+		if used[k] {
+			out = append(out, k)
+		}
+	}
+	for _, k := range defaultListKeys {
+		if !used[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// indexListItems accepts a key only when every item has a unique scalar value.
+func indexListItems(items []any, key string) (map[string]any, bool) {
+	indexed := make(map[string]any, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		value, ok := listKeyValue(m[key])
+		if !ok {
+			return nil, false
+		}
+		if _, exists := indexed[value]; exists {
+			return nil, false
+		}
+		indexed[value] = item
+	}
+	return indexed, true
+}
+
+// listKeyValue normalizes string and numeric keys for bodies and FieldsV1 JSON.
+func listKeyValue(value any) (string, bool) {
+	switch value.(type) {
+	case string, float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
+		return fmt.Sprint(value), true
+	default:
+		return "", false
+	}
+}
+
+// listOwnershipByKey indexes k: subtrees by the selected field, including
+// multi-field keys. Merge subtrees that identify the same selected value.
+func listOwnershipByKey(owned any, key string) map[string]any {
+	om, _ := owned.(map[string]any)
+	indexed := map[string]any{}
+	for field, subtree := range om {
+		if !strings.HasPrefix(field, "k:") {
+			continue
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(field, "k:")), &fields); err != nil {
+			continue
+		}
+		value, ok := listKeyValue(fields[key])
+		if !ok {
+			continue
+		}
+		trie, ok := subtree.(map[string]any)
+		if !ok {
+			continue
+		}
+		cp, ok := indexed[value].(map[string]any)
+		if !ok {
+			cp = map[string]any{}
+			indexed[value] = cp
+		}
+		mergeFieldsTries(cp, trie)
+		// Key fields identify the item; SSA records them as owned even when
+		// the API server defaulted them (ports[].protocol), so they are not
+		// pending removals.
+		for f := range fields {
+			delete(cp, "f:"+f)
+		}
+	}
+	return indexed
 }
 
 // applyManagerFields merges the FieldsV1 tries of every managedFields entry
