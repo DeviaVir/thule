@@ -3,7 +3,9 @@ package diff
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DeviaVir/thule/internal/render"
@@ -113,6 +115,7 @@ func Compute(desired, actual []render.Resource, opts Options) ([]Change, Summary
 					actualBody = projected
 				}
 			}
+			normalizeQuantityPairs(desiredBody, actualBody, "")
 			if equal(desiredBody, actualBody) {
 				change.Action = NoOp
 				summary.NoOps++
@@ -177,6 +180,116 @@ func normalize(r render.Resource, ignore []string) render.Resource {
 	}
 	r.Body = cp
 	return r
+}
+
+// normalizeQuantityPairs reuses the desired representation for equal quantities
+// in the copied live body, so every downstream comparison sees the same values.
+// Run after projection to avoid pairing desired items with injected live items.
+func normalizeQuantityPairs(desired, actual any, parent string) {
+	switch d := desired.(type) {
+	case map[string]any:
+		a, ok := actual.(map[string]any)
+		if !ok {
+			return
+		}
+		for key, dv := range d {
+			av, exists := a[key]
+			if !exists {
+				continue
+			}
+			if isQuantityField(parent, key) {
+				dq, dok := parseQuantity(fmt.Sprint(dv))
+				aq, aok := parseQuantity(fmt.Sprint(av))
+				if dok && aok && dq.Cmp(aq) == 0 {
+					a[key] = dv
+					continue
+				}
+			}
+			normalizeQuantityPairs(dv, av, key)
+		}
+	case []any:
+		a, ok := actual.([]any)
+		if !ok {
+			return
+		}
+		for i := 0; i < len(d) && i < len(a); i++ {
+			normalizeQuantityPairs(d[i], a[i], "")
+		}
+	}
+}
+
+// Match quantity map leaves at any nesting depth, including pod templates and
+// LimitRange entries. Ordinary strings (e.g. env[].value and resource claims)
+// retain their existing comparison semantics.
+func isQuantityField(parent, key string) bool {
+	if key == "sizeLimit" {
+		return true
+	}
+	switch parent {
+	case "requests", "limits", "hard", "overhead", "max", "min", "default", "defaultRequest", "maxLimitRequestRatio":
+		return true
+	default:
+		return false
+	}
+}
+
+// quantityScales maps Kubernetes quantity suffixes to their multipliers.
+var quantityScales = map[string]*big.Rat{
+	"n": big.NewRat(1, 1_000_000_000), "u": big.NewRat(1, 1_000_000), "m": big.NewRat(1, 1000),
+	"": big.NewRat(1, 1), "k": big.NewRat(1_000, 1), "M": big.NewRat(1_000_000, 1),
+	"G": big.NewRat(1_000_000_000, 1), "T": big.NewRat(1_000_000_000_000, 1),
+	"P": big.NewRat(1_000_000_000_000_000, 1), "E": big.NewRat(1_000_000_000_000_000_000, 1),
+	"Ki": big.NewRat(1<<10, 1), "Mi": big.NewRat(1<<20, 1), "Gi": big.NewRat(1<<30, 1),
+	"Ti": big.NewRat(1<<40, 1), "Pi": big.NewRat(1<<50, 1), "Ei": big.NewRat(1<<60, 1),
+}
+
+// parseQuantity returns the exact value of a Kubernetes quantity
+// (<signedNumber><suffix>, where suffix is binary SI, decimal SI, or e/E<int>).
+// It does not import k8s.io/apimachinery/pkg/api/resource: that import makes the
+// go command rewrite go.mod to `go 1.25.0`, which lsif-go cannot parse.
+func parseQuantity(s string) (*big.Rat, bool) {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	digits, dots := 0, 0
+	for ; i < len(s) && (s[i] == '.' || (s[i] >= '0' && s[i] <= '9')); i++ {
+		if s[i] == '.' {
+			dots++
+		} else {
+			digits++
+		}
+	}
+	if digits == 0 || dots > 1 {
+		return nil, false
+	}
+	number, suffix := strings.TrimSuffix(s[:i], "."), s[i:]
+	value, ok := new(big.Rat).SetString(number)
+	if !ok {
+		return nil, false
+	}
+	if scale, known := quantityScales[suffix]; known {
+		return value.Mul(value, scale), true
+	}
+	if len(suffix) < 2 || (suffix[0] != 'e' && suffix[0] != 'E') {
+		return nil, false
+	}
+	exp, err := strconv.Atoi(suffix[1:])
+	if err != nil || exp < -1000 || exp > 1000 {
+		return nil, false
+	}
+	scale := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(abs(exp))), nil))
+	if exp < 0 {
+		scale.Inv(scale)
+	}
+	return value.Mul(value, scale), true
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func deletePath(obj map[string]any, path string) {
