@@ -185,7 +185,7 @@ func TestProjectKeyedVolumeMountsAndPorts(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := projectActualToDesired(tc.desired, tc.actual, tc.owned)
+			got := projectActualToDesired(projectionContext{}, tc.desired, tc.actual, tc.owned)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("expected %#v, got %#v", tc.want, got)
 			}
@@ -206,7 +206,7 @@ func TestProjectListKeyCandidates(t *testing.T) {
 				actualItem[later] = "live"
 				injectedItem[later] = "injected"
 			}
-			got := projectActualToDesired([]any{desiredItem}, []any{injectedItem, actualItem}, nil)
+			got := projectActualToDesired(projectionContext{}, []any{desiredItem}, []any{injectedItem, actualItem}, nil)
 			if !reflect.DeepEqual(got, []any{actualItem}) {
 				t.Fatalf("expected item matched by %s, got %#v", key, got)
 			}
@@ -224,7 +224,7 @@ func TestProjectListKeyFieldsAreNotPendingRemovals(t *testing.T) {
 			".": map[string]any{}, "f:containerPort": map[string]any{}, "f:name": map[string]any{}, "f:protocol": map[string]any{},
 		},
 	}
-	got := projectActualToDesired(desired, actual, owned)
+	got := projectActualToDesired(projectionContext{}, desired, actual, owned)
 	if !reflect.DeepEqual(got, desired) {
 		t.Fatalf("expected defaulted key field hidden, got %#v", got)
 	}
@@ -243,7 +243,7 @@ func TestProjectListKeyPrefersOwnershipKey(t *testing.T) {
 		`k:{"mountPath":"/data"}`:  map[string]any{".": map[string]any{}},
 		`k:{"mountPath":"/cache"}`: map[string]any{".": map[string]any{}},
 	}
-	got := projectActualToDesired(desired, actual, owned)
+	got := projectActualToDesired(projectionContext{}, desired, actual, owned)
 	want := []any{actual[0], actual[1]}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected owned /cache removal kept and /injected dropped, got %#v", got)
@@ -305,7 +305,7 @@ func TestProjectListsWithoutQualifyingKeyStayPositional(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Even an owned extra field stays projected away in positional fallback.
 			owned := map[string]any{`k:{"name":"b"}`: map[string]any{"f:extra": map[string]any{}}}
-			got := projectActualToDesired(tc.desired, tc.actual, owned)
+			got := projectActualToDesired(projectionContext{}, tc.desired, tc.actual, owned)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("expected positional projection %#v, got %#v", tc.want, got)
 			}
@@ -329,7 +329,7 @@ func TestProjectKeyedListEmptySidesAndOwnership(t *testing.T) {
 		{name: "both empty", desired: []any{}, actual: []any{}, want: []any{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := projectActualToDesired(tc.desired, tc.actual, tc.owned)
+			got := projectActualToDesired(projectionContext{}, tc.desired, tc.actual, tc.owned)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("expected %#v, got %#v", tc.want, got)
 			}
@@ -594,7 +594,7 @@ func TestHelpersAndRiskDetection(t *testing.T) {
 }
 
 func TestProjectActualToDesiredAndPruneNilValues(t *testing.T) {
-	projected := projectActualToDesired(
+	projected := projectActualToDesired(projectionContext{},
 		map[string]any{
 			"spec": map[string]any{
 				"ports": []any{
@@ -622,11 +622,11 @@ func TestProjectActualToDesiredAndPruneNilValues(t *testing.T) {
 	}
 
 	// When desired/actual types differ, actual value is preserved.
-	if got := projectActualToDesired([]any{1}, "raw-string", nil); got != "raw-string" {
+	if got := projectActualToDesired(projectionContext{}, []any{1}, "raw-string", nil); got != "raw-string" {
 		t.Fatalf("expected mismatched type passthrough, got %#v", got)
 	}
 	// Missing actual array entries produce nil placeholders.
-	arr := projectActualToDesired([]any{"a", "b"}, []any{"a"}, nil).([]any)
+	arr := projectActualToDesired(projectionContext{}, []any{"a", "b"}, []any{"a"}, nil).([]any)
 	if len(arr) != 2 || arr[1] != nil {
 		t.Fatalf("expected nil placeholder for missing entry, got %#v", arr)
 	}

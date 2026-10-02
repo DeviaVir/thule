@@ -111,7 +111,7 @@ func Compute(desired, actual []render.Resource, opts Options) ([]Change, Summary
 			desiredBody := d.Body
 			actualBody := a.Body
 			if opts.IgnoreActualExtraFields {
-				if projected, ok := projectActualToDesired(desiredBody, actualBody, ownedByID[k]).(map[string]any); ok {
+				if projected, ok := projectActualToDesired(projectionContext{apiVersion: d.APIVersion, kind: d.Kind}, desiredBody, actualBody, ownedByID[k]).(map[string]any); ok {
 					actualBody = projected
 				}
 			}
@@ -433,12 +433,65 @@ func mustYAML(obj any) (out string) {
 	return string(b)
 }
 
+// projectionContext scopes default recognition to an exact resource type and path.
+type projectionContext struct {
+	apiVersion string
+	kind       string
+	path       string
+}
+
+// Only these complete defaults can be omitted with empty ownership. Additional
+// fields or different values must remain visible as pending removals.
+var emptyOwnershipDefaults = map[projectionContext][]any{
+	{apiVersion: "apps/v1", kind: "Deployment", path: "spec.strategy"}: {map[string]any{
+		"type":          "RollingUpdate",
+		"rollingUpdate": map[string]any{"maxUnavailable": "25%", "maxSurge": "25%"},
+	}},
+	{apiVersion: "apps/v1", kind: "StatefulSet", path: "spec.updateStrategy"}: {
+		map[string]any{
+			"type":          "RollingUpdate",
+			"rollingUpdate": map[string]any{"partition": 0},
+		},
+		map[string]any{"type": "RollingUpdate"},
+	},
+	{apiVersion: "apps/v1", kind: "DaemonSet", path: "spec.updateStrategy"}: {map[string]any{
+		"type":          "RollingUpdate",
+		"rollingUpdate": map[string]any{"maxUnavailable": 1, "maxSurge": 0},
+	}},
+}
+
+func omitEmptyOwnedValue(ctx projectionContext, actual, owned any) bool {
+	fields, ok := owned.(map[string]any)
+	if !ok || fields == nil || len(fields) != 0 {
+		return false
+	}
+	switch value := actual.(type) {
+	case map[string]any:
+		if len(value) == 0 {
+			return true
+		}
+	case []any:
+		if len(value) == 0 {
+			return true
+		}
+	}
+	// JSON equality treats integral float64 and int values alike, while
+	// preserving strings (including percentages) and all structural differences.
+	for _, value := range emptyOwnershipDefaults[ctx] {
+		if equalAny(actual, value) {
+			return true
+		}
+	}
+	return false
+}
+
 // projectActualToDesired drops live-only fields from the comparison, EXCEPT
 // fields the apply manager owns: those are pending removals the next apply
 // performs, so hiding them would hide a real change. `owned` is the merged
 // FieldsV1 trie of the apply managers at the current path (nil disables the
-// ownership exception and restores pure projection).
-func projectActualToDesired(desired, actual, owned any) any {
+// ownership exception and restores pure projection). Empty ownership of an
+// empty value or a known exact server default is noise, not a removal.
+func projectActualToDesired(ctx projectionContext, desired, actual, owned any) any {
 	switch dv := desired.(type) {
 	case map[string]any:
 		av, ok := actual.(map[string]any)
@@ -452,16 +505,21 @@ func projectActualToDesired(desired, actual, owned any) any {
 			if om != nil {
 				childOwned = om["f:"+k]
 			}
+			childCtx := ctx
+			childCtx.path = k
+			if ctx.path != "" {
+				childCtx.path = ctx.path + "." + k
+			}
 			dvv, exists := dv[k]
 			if !exists {
-				if childOwned != nil {
+				if childOwned != nil && !omitEmptyOwnedValue(childCtx, avv, childOwned) {
 					// Owned by the apply manager but gone from the desired
 					// manifest: surface the pending removal.
 					out[k] = avv
 				}
 				continue
 			}
-			out[k] = projectActualToDesired(dvv, avv, childOwned)
+			out[k] = projectActualToDesired(childCtx, dvv, avv, childOwned)
 		}
 		return out
 	case []any:
@@ -469,6 +527,7 @@ func projectActualToDesired(desired, actual, owned any) any {
 		if !ok {
 			return actual
 		}
+		ctx.path += "[]"
 		for _, key := range listKeyCandidates(owned) {
 			desiredByKey, dok := indexListItems(dv, key)
 			_, aok := indexListItems(av, key)
@@ -481,7 +540,7 @@ func projectActualToDesired(desired, actual, owned any) any {
 				value, _ := listKeyValue(item.(map[string]any)[key])
 				childOwned := ownedByKey[value]
 				if desiredItem, exists := desiredByKey[value]; exists {
-					out = append(out, projectActualToDesired(desiredItem, item, childOwned))
+					out = append(out, projectActualToDesired(ctx, desiredItem, item, childOwned))
 				} else if childOwned != nil {
 					// Keep owned live-only items verbatim to surface removals.
 					out = append(out, item)
@@ -497,7 +556,7 @@ func projectActualToDesired(desired, actual, owned any) any {
 			}
 			// Without a unique associative key, keep positional projection;
 			// FieldsV1 item ownership cannot reliably match these positions.
-			out = append(out, projectActualToDesired(dv[i], av[i], nil))
+			out = append(out, projectActualToDesired(ctx, dv[i], av[i], nil))
 		}
 		return out
 	default:
