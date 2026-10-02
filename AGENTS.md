@@ -22,6 +22,12 @@ If you are an agent working anywhere under this repo, read this file first and f
 
 ## Skills & context
 
+- **What**: Equivalent Kubernetes quantities must not produce a PATCH, changed path, diff line, or risk.
+  **Where**: `internal/diff/diff.go`, `internal/diff/quantity_test.go`
+  **How**: After live-field projection, `normalizeQuantityPairs` walks copied bodies and reuses desired quantity representations only when `parseQuantity` (exact `math/big` value) succeeds on both values and they are equal; recognize quantity map leaves and `sizeLimit` at any nesting depth.
+  **Gotchas**: Do not import `k8s.io/apimachinery/pkg/api/resource`: it makes the go command rewrite go.mod to `go 1.25.0`, which the GitLab `code_intelligence_go` job (lsif-go, Go 1.18) cannot parse. The parser is stricter than apimachinery (rejects `.`, `+`, exponents beyond +/-1000, and does not round below `1n`), which only keeps a PATCH visible. Keep env values and resource claims as ordinary strings. Normalize after projection so injected list items do not shift quantity pairing.
+  **Owner/Docs**: DevOps / Thule
+
 - **What**: Keyed list projection hides injected items while preserving apply-owned removals and real reorders.
   **Where**: `internal/diff/diff.go`, `internal/diff/diff_test.go`
   **How**: With `IgnoreActualExtraFields`, pair list-of-map items by the first unique scalar key from `name`, `mountPath`, `containerPort`, `port`, `devicePath`, trying fields used by the apply manager's FieldsV1 `k:` entries first; project matched live items in live order with their `k:` ownership subtrees and keep owned live-only items verbatim.
