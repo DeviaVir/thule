@@ -45,3 +45,9 @@ If you are an agent working anywhere under this repo, read this file first and f
   **How**: Reproduce with `go test ./internal/... ./pkg/... -covermode=atomic -coverprofile=unit.out` then `./scripts/check_coverage.sh 90 unit.out`; keep tests for `appendPlanSections` overflow paths (changes details start/end, findings start, oversized findings lines).
   **Gotchas**: CI runs in Go 1.25; if using `golang:1.25` container, ensure `/usr/local/go/bin` is on `PATH` when invoking `go` from `sh`.
   **Owner/Docs**: DevOps / Thule
+
+- **What**: Empty apply ownership can describe a typed-round-trip default, but also a real atomic-field removal.
+  **Where**: `internal/diff/diff.go`, `internal/diff/defaults_test.go`
+  **How**: During live-field projection, omit an absent desired key with exactly empty merged ownership only for an empty map/list or an exact match to one of the `emptyOwnershipDefaults` forms by API version, kind, and path. StatefulSet updateStrategy accepts RollingUpdate with partition 0 or no rollingUpdate key. JSON comparison preserves numeric equivalence without equating numbers and strings.
+  **Gotchas**: Keep non-default atomic structs, child or `.` ownership, and defaults at other kinds/versions/paths visible. The explicit table covers apps/v1 Deployment strategy and StatefulSet/DaemonSet updateStrategy; do not generalize empty ownership to unowned.
+  **Owner/Docs**: DevOps / Thule
