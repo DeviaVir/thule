@@ -51,3 +51,9 @@ If you are an agent working anywhere under this repo, read this file first and f
   **How**: During live-field projection, omit an absent desired key with exactly empty merged ownership only for an empty map/list or an exact match to one of the `emptyOwnershipDefaults` forms by API version, kind, and path. StatefulSet updateStrategy accepts RollingUpdate with partition 0 or no rollingUpdate key. JSON comparison preserves numeric equivalence without equating numbers and strings.
   **Gotchas**: Keep non-default atomic structs, child or `.` ownership, and defaults at other kinds/versions/paths visible. The explicit table covers apps/v1 Deployment strategy and StatefulSet/DaemonSet updateStrategy; do not generalize empty ownership to unowned.
   **Owner/Docs**: DevOps / Thule
+
+- **What**: Repository resource guards must use the planner's changed-file selection and publish one combined guard status.
+  **Where**: `internal/guard/resources.go`, `internal/orchestrator/planner.go`, `cmd/thule/main.go`
+  **How**: Evaluate resource guards after `filterDesiredByChangedFiles`, accumulate across projects, then combine with path guards for the status and comment banner. On an early planning error, publish the path-guard result.
+  **Gotchas**: The local `thule plan` preview bypasses repository guards; verify guard behavior through planner tests with in-memory adapters. Never flatten list instances across parents when matching requirements.
+  **Owner/Docs**: Thule / README repository configuration

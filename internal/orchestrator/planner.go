@@ -49,27 +49,32 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 		p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/plan", State: vcs.CheckPending, Description: "Thule plan running"})
 	}
 
-	guardBanner := ""
-	var followUp guard.FollowUp
-	if repoCfg, err := guard.LoadConfig(p.repoRoot); err != nil {
-		// a broken .thule.yaml must fail loudly, not silently stop guarding
-		if p.status != nil {
-			p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/guards", State: vcs.CheckFailed, Description: err.Error()})
+	repoCfg, guardErr := guard.LoadConfig(p.repoRoot)
+	followUp := repoCfg.FollowUp
+	pathViolations, pathTouched := guard.Evaluate(repoCfg, evt.ChangedFiles)
+	violations, touched := pathViolations, pathTouched
+	guardStatusPublished := false
+	publishGuardStatus := func(vs []guard.Violation, selected bool) {
+		guardStatusPublished = true
+		if p.status == nil || (guardErr == nil && !selected && len(vs) == 0) {
+			return
 		}
-	} else {
-		followUp = repoCfg.FollowUp
-		violations, touched := guard.Evaluate(repoCfg, evt.ChangedFiles)
-		guardBanner = report.BuildGuardWarning(violations)
-		if p.status != nil && touched {
-			state := vcs.CheckSuccess
-			desc := "No guard violations"
-			if len(violations) > 0 {
-				state = vcs.CheckFailed
-				desc = fmt.Sprintf("%d guard violation(s); see plan comment", len(violations))
-			}
-			p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/guards", State: state, Description: desc})
+		state, desc := vcs.CheckSuccess, "No guard violations"
+		if guardErr != nil {
+			// Invalid repository config must fail loudly, even on an early exit.
+			state, desc = vcs.CheckFailed, guardErr.Error()
+		} else if len(vs) > 0 {
+			state = vcs.CheckFailed
+			desc = fmt.Sprintf("%d guard violation(s); see plan comment", len(vs))
 		}
+		p.status.SetStatus(vcs.StatusCheck{MergeReqID: evt.MergeReqID, SHA: evt.HeadSHA, Context: "thule/guards", State: state, Description: desc})
 	}
+	defer func() {
+		if !guardStatusPublished {
+			// Preserve path checks when rendering or cluster reads prevent a plan.
+			publishGuardStatus(pathViolations, pathTouched)
+		}
+	}()
 
 	projects := project.DiscoverFromChangedFiles(evt.ChangedFiles)
 	sort.SliceStable(projects, func(i, j int) bool {
@@ -115,6 +120,9 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 			return err
 		}
 		desired = filterDesiredByChangedFiles(desired, evt.ChangedFiles, p.repoRoot)
+		resourceViolations, resourceTouched := guard.EvaluateResources(repoCfg, desired, p.repoRoot)
+		violations = append(violations, resourceViolations...)
+		touched = touched || resourceTouched
 		if len(desired) == 0 {
 			continue
 		}
@@ -153,6 +161,9 @@ func (p *Planner) PlanForEvent(ctx context.Context, evt MergeRequestEvent) error
 			Findings: findings,
 		})
 	}
+
+	publishGuardStatus(violations, touched)
+	guardBanner := report.BuildGuardWarning(violations)
 
 	if !planned && p.comments != nil {
 		body := guardBanner + report.BuildNoChangesComment(evt.HeadSHA, evt.ChangedFiles, 50)

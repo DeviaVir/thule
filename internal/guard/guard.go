@@ -2,10 +2,8 @@
 //
 // Guards are MR-wide checks configured by the target repository in a
 // .thule.yaml file at its root. Unlike per-project policy findings, guards
-// look at the shape of the whole change set (which paths are touched
-// together), so repositories can encode rules like "do not roll the same
-// app in more than one failure domain in a single MR" without Thule
-// knowing anything about the repository's layout.
+// check changed paths and rendered resource content without knowing
+// anything about the repository's layout.
 package guard
 
 import (
@@ -26,6 +24,9 @@ const ConfigFilename = ".thule.yaml"
 // under two or more groups. "Group" is whatever failure domain the path
 // segment encodes: a region, a site, a shard.
 const TypeSameAppAcrossGroups = "same-app-across-groups"
+
+// TypeListItemRequires checks dependencies between items in the same list.
+const TypeListItemRequires = "list-item-requires"
 
 type Config struct {
 	Guards []Spec `yaml:"guards"`
@@ -57,15 +58,26 @@ type Spec struct {
 	Prefix string `yaml:"prefix"`
 	// Exempt lists app names the guard ignores (e.g. "flux-system").
 	Exempt []string `yaml:"exempt"`
+	// Resource selectors and list-item predicates for list-item-requires.
+	Kind     string         `yaml:"kind"`
+	APIGroup string         `yaml:"apiGroup"`
+	List     string         `yaml:"list"`
+	When     map[string]any `yaml:"when"`
+	Require  map[string]any `yaml:"require"`
 }
 
 type Violation struct {
 	Guard  Spec
 	App    string
 	Groups []string
+	// Detail describes a resource violation; path guards retain their message.
+	Detail string
 }
 
 func (v Violation) Message() string {
+	if v.Detail != "" {
+		return fmt.Sprintf("guard %q: %s", v.Guard.Name, v.Detail)
+	}
 	return fmt.Sprintf("guard %q: app %q is modified in multiple groups (%s) under %s; split the change so each group rolls independently",
 		v.Guard.Name, v.App, strings.Join(v.Groups, ", "), v.Guard.Prefix)
 }
@@ -89,11 +101,17 @@ func LoadConfig(repoRoot string) (Config, error) {
 		if strings.TrimSpace(g.Name) == "" {
 			return Config{}, fmt.Errorf("%s: guards[%d]: name is required", ConfigFilename, i)
 		}
-		if g.Type != TypeSameAppAcrossGroups {
+		switch g.Type {
+		case TypeSameAppAcrossGroups:
+			if strings.TrimSpace(g.Prefix) == "" {
+				return Config{}, fmt.Errorf("%s: guard %q: prefix is required", ConfigFilename, g.Name)
+			}
+		case TypeListItemRequires:
+			if err := validateListItemRequires(g); err != nil {
+				return Config{}, fmt.Errorf("%s: guard %q: %w", ConfigFilename, g.Name, err)
+			}
+		default:
 			return Config{}, fmt.Errorf("%s: guard %q: unknown type %q", ConfigFilename, g.Name, g.Type)
-		}
-		if strings.TrimSpace(g.Prefix) == "" {
-			return Config{}, fmt.Errorf("%s: guard %q: prefix is required", ConfigFilename, g.Name)
 		}
 	}
 	return cfg, nil
@@ -107,6 +125,9 @@ func Evaluate(cfg Config, changedFiles []string) ([]Violation, bool) {
 	violations := []Violation{}
 	touched := false
 	for _, g := range cfg.Guards {
+		if g.Type != TypeSameAppAcrossGroups {
+			continue
+		}
 		vs, t := evaluateSameAppAcrossGroups(g, changedFiles)
 		violations = append(violations, vs...)
 		touched = touched || t
