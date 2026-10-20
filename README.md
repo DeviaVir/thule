@@ -101,7 +101,7 @@ comment:
 
 ### Repo-wide: `.thule.yaml`
 
-Optional, at the repository root. Where `thule.conf` configures one project, `.thule.yaml` configures MR-wide behavior: guards over the shape of the whole change set, and a follow-up comment posted after each plan.
+Optional, at the repository root. Where `thule.conf` configures one project, `.thule.yaml` configures MR-wide behavior: guards over changed paths and rendered resources, and a follow-up comment posted after each plan.
 
 ```yaml
 guards:
@@ -115,6 +115,22 @@ guards:
     exempt:
       - flux-system
 
+  # Each rate-limited HTTP rule must also enable bearer authentication.
+  - name: rate-limited-routes-need-bearer-auth
+    description: Enable bearer authentication on each rate-limited rule
+    type: list-item-requires
+    kind: ApisixRoute
+    apiGroup: apisix.apache.org  # optional; omit to match any API group
+    list: spec.http[].plugins
+    when:
+      name: limit-count
+      enable: true
+    require:
+      name: openid-connect
+      enable: true
+      config.bearer_only: true
+    prefix: clusters/prod       # optional for list-item-requires
+
 followUp:
   # Posted as a standalone comment after each plan comment (never
   # superseded). Useful to trigger downstream bots once the plan exists.
@@ -127,7 +143,11 @@ followUp:
   commentNoPlan: '/review'
 ```
 
-Guard results surface in three places: a banner on top of the plan comment, a `thule/guards` commit status (failed on violation, success once the MR is split; absent when no guarded tree is touched), and loud failure of the status when `.thule.yaml` itself is invalid. Make `thule/guards` a required check to enforce guards rather than just surface them.
+For `list-item-requires`, `name`, `kind`, `list`, and non-empty `when` and `require` maps are required. The dotted `list` path uses `[]` on intermediate segments to iterate parents; its final segment names a list without `[]`. Every predicate key must match, with dotted keys addressing nested item fields. Booleans, strings, and numbers retain their types (`true` differs from `"true"` and `1`); strings match exactly, numbers compare by value, and missing fields never match. Each list is independent: authentication on another rule or resource cannot satisfy the requirement. A list with no matching `when` item produces no violation. Missing or non-list paths have no items to check.
+
+Resource guards evaluate only rendered resources retained by the planner's changed-file filter. `kind`, optional `apiGroup`, and optional repository-relative source `prefix` select resources. Violations identify the resource, source file, and parent indices and name when present, and include the guard description in the banner. `prefix` remains required for `same-app-across-groups`. Repository guards run in the event planner; the local `thule plan` preview does not evaluate them.
+
+Guard results surface in three places: a banner on top of the plan comment, a `thule/guards` commit status (failed on violation, success when a guarded prefix is touched or a resource is selected and no guard fails; absent otherwise), and loud failure of the status when `.thule.yaml` itself is invalid. Make `thule/guards` a required check to enforce guards rather than just surface them.
 
 ## Deployment
 
